@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: '0 6 * * 1' # every Monday, to pick up last week's data
+    - cron: '0 6 * * *' # daily, to fill in and refresh market data
   workflow_dispatch:
 
 permissions:
@@ -34,12 +34,14 @@ jobs:
           key: dukascopy-${{ github.run_id }}
           restore-keys: dukascopy-
       - name: Download market data (last 12 months)
-        # The site still deploys with demo data and CSV import if Dukascopy is unreachable.
+        # Dukascopy throttles GitHub's servers, so each run downloads for up to 40 minutes,
+        # newest months first, and the cache above carries progress to the next run.
+        # The site still deploys with whatever data it has (or demo data and CSV import).
         continue-on-error: true
-        run: |
-          set -o pipefail
-          DEBUG='dukascopy-node*' npm run fetch-data -- --from "$(date -u -d '12 months ago' +%Y-%m-01)" 2>&1 | tee fetch.log
-          echo "::notice title=fetch-data log tail::$(tail -c 6000 fetch.log | sed ':a;N;$!ba;s/\n/%0A/g')"
+        timeout-minutes: 50
+        env:
+          FETCH_MINUTES: 40
+        run: npm run fetch-data -- --from "$(date -u -d '12 months ago' +%Y-%m-01)"
       - run: npm run build
         env:
           BASE_PATH: /${{ github.event.repository.name }}/
