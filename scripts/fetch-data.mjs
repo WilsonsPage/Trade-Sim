@@ -1,12 +1,16 @@
-// Downloads free M1 history from Dukascopy into public/data/ for the replay app.
+// Downloads free M1 history into public/data/ for the replay app.
 //
 //   npm run fetch-data                                  -> all symbols, last 6 months
 //   npm run fetch-data -- EURUSD XAUUSD                 -> chosen symbols, last 6 months
 //   npm run fetch-data -- --from 2024-01-01 --to 2024-07-01 GBPUSD
+//   npm run fetch-data -- --source dukascopy            -> use Dukascopy instead of histdata.com
 //
-// Raw downloads are cached in .dukascopy-cache so re-running is fast.
+// histdata.com (the default) has M1 data up to the last completed month and works from
+// cloud servers. Dukascopy is more current but blocks most cloud IPs, so it suits a laptop.
+// Raw downloads are cached in .histdata-cache / .dukascopy-cache so re-running is fast.
 
 import { getHistoricalRates } from 'dukascopy-node';
+import { fetchHistdata } from './histdata.mjs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -16,17 +20,18 @@ const DIGITS = { USDJPY: 3, XAUUSD: 3 };
 const round = (n, d) => Math.round(n * 10 ** d) / 10 ** d;
 
 function parseArgs(argv) {
-  const args = { symbols: [], from: null, to: null };
+  const args = { symbols: [], from: null, to: null, source: 'histdata' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--from') args.from = argv[++i];
     else if (a === '--to') args.to = argv[++i];
+    else if (a === '--source') args.source = argv[++i];
     else args.symbols.push(a.toUpperCase());
   }
   if (!args.symbols.length) args.symbols = SYMBOLS;
   const to = args.to ? new Date(args.to) : new Date();
   const from = args.from ? new Date(args.from) : new Date(to.getTime() - 182 * 86400_000);
-  return { symbols: args.symbols, from, to };
+  return { symbols: args.symbols, from, to, source: args.source };
 }
 
 // Split the range into calendar months so progress is visible and failures are local.
@@ -106,13 +111,19 @@ function withDeadline(promise) {
 }
 
 async function main() {
-  const { symbols, from, to } = parseArgs(process.argv.slice(2));
+  const { symbols, from, to, source } = parseArgs(process.argv.slice(2));
   await mkdir(OUT_DIR, { recursive: true });
   let index = await readIndex();
   const bars = Object.fromEntries(symbols.map((s) => [s, []]));
 
-  console.log(`Downloading M1 bars ${from.toISOString().slice(0, 10)} → ${to.toISOString().slice(0, 10)}`);
-  outer: for (const [start, end] of monthChunks(from, to).reverse()) {
+  console.log(`Downloading M1 bars ${from.toISOString().slice(0, 10)} → ${to.toISOString().slice(0, 10)} from ${source}`);
+  if (source === 'histdata') {
+    for (const symbol of symbols) {
+      const d = DIGITS[symbol] ?? 5;
+      const rows = await fetchHistdata(symbol, from, to, warn);
+      bars[symbol] = rows.map(([t, o, h, l, c]) => [t, round(o, d), round(h, d), round(l, d), round(c, d)]);
+    }
+  } else outer: for (const [start, end] of monthChunks(from, to).reverse()) {
     for (const symbol of symbols) {
       const label = `${symbol} ${start.toISOString().slice(0, 7)}`;
       if (Date.now() >= deadline) {
