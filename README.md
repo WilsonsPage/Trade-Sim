@@ -2,7 +2,19 @@
 
 A bar-replay trading simulator: replay historical charts bar by bar, take fake trades, and review your stats at the end of each session.
 
-## Getting started
+## Use it
+
+Open **https://wilsonspage.github.io/Trade-Sim/** in Chrome or Edge. Nothing to install, and market data for forex majors and gold (last 12 months, refreshed weekly) is already included.
+
+To get it as an app:
+
+- **Laptop (Chrome/Edge):** click the install icon at the right of the address bar. It then opens in its own window from your Start menu or Dock.
+- **Android:** Chrome menu → *Add to Home screen*.
+- **iPhone:** Safari share button → *Add to Home Screen*.
+
+The site is built and published by `.github/workflows/deploy.yml` on every push to `main` and every Monday.
+
+## Run it locally (for development)
 
 Needs [Node.js](https://nodejs.org) 20 or newer.
 
