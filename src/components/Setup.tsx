@@ -64,8 +64,8 @@ export function Setup({ onStart }: { onStart: (c: SessionConfig) => void }) {
       {index === null && <p className="muted">Looking for downloaded data…</p>}
       {index?.length === 0 && (
         <p className="muted">
-          No downloaded data yet. Run <code>npm run fetch-data</code> to download forex majors and gold, or import a
-          CSV below.
+          No market data found. Try the demo data or import a CSV below. (Running locally? Use{' '}
+          <code>npm run fetch-data</code> to download forex majors and gold.)
         </p>
       )}
       <div className="chips">

@@ -1,0 +1,55 @@
+# Builds the app with fresh market data and publishes it to GitHub Pages.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * 1' # every Monday, to pick up last week's data
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - uses: actions/cache@v4
+        with:
+          path: .dukascopy-cache
+          key: dukascopy-${{ github.run_id }}
+          restore-keys: dukascopy-
+      - name: Download market data (last 12 months)
+        # The site still deploys with demo data and CSV import if Dukascopy is unreachable.
+        continue-on-error: true
+        run: npm run fetch-data -- --from "$(date -u -d '12 months ago' +%Y-%m-01)"
+      - run: npm run build
+        env:
+          BASE_PATH: /${{ github.event.repository.name }}/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

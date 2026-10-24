@@ -13,7 +13,7 @@ type RawBar = [number, number, number, number, number];
 /** Lists datasets downloaded with `npm run fetch-data`. Empty if none yet. */
 export async function loadIndex(): Promise<DatasetInfo[]> {
   try {
-    const res = await fetch('/data/index.json');
+    const res = await fetch(`${import.meta.env.BASE_URL}data/index.json`);
     if (!res.ok) return [];
     return (await res.json()) as DatasetInfo[];
   } catch {
@@ -22,7 +22,7 @@ export async function loadIndex(): Promise<DatasetInfo[]> {
 }
 
 export async function loadDataset(info: DatasetInfo): Promise<Dataset> {
-  const res = await fetch(`/data/${info.file}`);
+  const res = await fetch(`${import.meta.env.BASE_URL}data/${info.file}`);
   if (!res.ok) throw new Error(`Could not load ${info.file} (${res.status})`);
   const json = (await res.json()) as { symbol: string; baseSeconds: number; bars: RawBar[] };
   return {

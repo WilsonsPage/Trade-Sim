@@ -12,6 +12,8 @@ import path from 'node:path';
 
 const SYMBOLS = ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD', 'XAUUSD'];
 const OUT_DIR = path.resolve('public/data');
+const DIGITS = { USDJPY: 3, XAUUSD: 3 };
+const round = (n, d) => Math.round(n * 10 ** d) / 10 ** d;
 
 function parseArgs(argv) {
   const args = { symbols: [], from: null, to: null };
@@ -57,7 +59,8 @@ async function fetchSymbol(symbol, from, to) {
       pauseBetweenBatchesMs: 500,
       retryCount: 3,
     });
-    for (const [t, o, h, l, c] of rows) bars.push([Math.floor(t / 1000), o, h, l, c]);
+    const d = DIGITS[symbol] ?? 5;
+    for (const [t, o, h, l, c] of rows) bars.push([Math.floor(t / 1000), round(o, d), round(h, d), round(l, d), round(c, d)]);
     console.log(`${rows.length} bars`);
   }
   return bars;
