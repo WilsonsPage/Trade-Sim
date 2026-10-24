@@ -36,7 +36,10 @@ jobs:
       - name: Download market data (last 12 months)
         # The site still deploys with demo data and CSV import if Dukascopy is unreachable.
         continue-on-error: true
-        run: npm run fetch-data -- --from "$(date -u -d '12 months ago' +%Y-%m-01)"
+        run: |
+          set -o pipefail
+          DEBUG='dukascopy-node*' npm run fetch-data -- --from "$(date -u -d '12 months ago' +%Y-%m-01)" 2>&1 | tee fetch.log
+          echo "::notice title=fetch-data log tail::$(tail -c 6000 fetch.log | sed ':a;N;$!ba;s/\n/%0A/g')"
       - run: npm run build
         env:
           BASE_PATH: /${{ github.event.repository.name }}/
