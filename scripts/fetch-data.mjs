@@ -66,6 +66,12 @@ async function fetchSymbol(symbol, from, to) {
   return bars;
 }
 
+// Surfaces problems as annotations on the GitHub Actions run.
+function warn(message) {
+  console.warn(`  ${message}`);
+  if (process.env.GITHUB_ACTIONS) console.log(`::warning title=fetch-data::${message.replace(/\r?\n/g, ' ')}`);
+}
+
 async function readIndex() {
   try {
     return JSON.parse(await readFile(path.join(OUT_DIR, 'index.json'), 'utf8'));
@@ -85,7 +91,7 @@ async function main() {
     try {
       const bars = await fetchSymbol(symbol, from, to);
       if (!bars.length) {
-        console.warn(`  ${symbol}: no data returned, skipped`);
+        warn(`${symbol}: no data returned, skipped`);
         continue;
       }
       const file = `${symbol}.json`;
@@ -95,7 +101,7 @@ async function main() {
       await writeFile(path.join(OUT_DIR, 'index.json'), JSON.stringify(index, null, 2));
       console.log(`  saved ${file} (${bars.length} bars)`);
     } catch (err) {
-      console.error(`  ${symbol} failed: ${err.message}`);
+      warn(`${symbol} failed: ${err.message}${err.cause ? ` (cause: ${err.cause.message ?? err.cause})` : ''}`);
     }
   }
 }
