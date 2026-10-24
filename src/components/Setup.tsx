@@ -7,6 +7,7 @@ export interface SessionConfig {
   dataset: Dataset;
   tfSeconds: number;
   startTime: number;
+  startBalance: number;
 }
 
 const toDateInput = (t: number) => new Date(t * 1000).toISOString().slice(0, 10);
@@ -17,6 +18,7 @@ export function Setup({ onStart }: { onStart: (c: SessionConfig) => void }) {
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [tfSeconds, setTfSeconds] = useState(900);
   const [start, setStart] = useState('');
+  const [balance, setBalance] = useState('10000');
   const [status, setStatus] = useState('');
 
   useEffect(() => {
@@ -117,11 +119,14 @@ export function Setup({ onStart }: { onStart: (c: SessionConfig) => void }) {
             onChange={(e) => setStart(e.target.value)}
           />
 
+          <h2>4. Starting balance (USD)</h2>
+          <input type="number" min="100" step="100" value={balance} onChange={(e) => setBalance(e.target.value)} />
+
           <div>
             <button
               className="primary"
-              disabled={!start}
-              onClick={() => onStart({ dataset, tfSeconds, startTime: fromDateInput(start) })}
+              disabled={!start || !(Number(balance) > 0)}
+              onClick={() => onStart({ dataset, tfSeconds, startTime: fromDateInput(start), startBalance: Number(balance) })}
             >
               Start replay
             </button>

@@ -60,9 +60,21 @@ plot(fast, { title: 'Fast', color: '#26a69a' });
 plot(slow, { title: 'Slow', color: '#ef5350' });
 ```
 
+## Trading
+
+The right-hand panel works like the MT5 mobile app:
+
+- **Market execution**: set volume (lots), optional stop loss and take profit, then **SELL** or **BUY** at the current price. Risk, reward and R:R are shown as you type.
+- **Pending orders**: Buy Limit, Sell Limit, Buy Stop and Sell Stop at a price you choose, with optional SL/TP.
+- **Positions**: live P/L. Tap a position to modify SL/TP or close it.
+- **History**: closed trades with exit reason (SL, TP or manual).
+- Entries, SL/TP and pending orders appear as lines on the chart, and fills as markers.
+
+Orders fill on M1 data inside each chart bar. If SL and TP are both touched in the same minute, the stop loss is assumed to hit first, and a gap through a level fills at the open. P/L is in USD (USD-based pairs such as USDJPY are converted at the exit price). Spread and commission are not modelled yet.
+
 ## Roadmap
 
 1. ✅ Data and replay chart
-2. Trading engine: market buy/sell, lot size, SL/TP, pending limit and stop orders, positions panel
+2. ✅ Drawing tools, indicators and trading engine
 3. Saved sessions and end-of-session stats (trades, PnL, strike rate, drawdown, equity curve)
 4. Polish and mobile (installable PWA)
