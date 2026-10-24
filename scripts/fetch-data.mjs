@@ -67,6 +67,10 @@ async function fetchSymbol(symbol, from, to) {
 }
 
 // Surfaces problems as annotations on the GitHub Actions run.
+function notice(message) {
+  if (process.env.GITHUB_ACTIONS) console.log(`::notice title=fetch-data::${message}`);
+}
+
 function warn(message) {
   console.warn(`  ${message}`);
   if (process.env.GITHUB_ACTIONS) console.log(`::warning title=fetch-data::${message.replace(/\r?\n/g, ' ')}`);
@@ -100,10 +104,15 @@ async function main() {
       index.push({ symbol, file, from: bars[0][0], to: bars[bars.length - 1][0], count: bars.length });
       await writeFile(path.join(OUT_DIR, 'index.json'), JSON.stringify(index, null, 2));
       console.log(`  saved ${file} (${bars.length} bars)`);
+      notice(`${symbol}: saved ${bars.length} bars`);
     } catch (err) {
       warn(`${symbol} failed: ${err.message}${err.cause ? ` (cause: ${err.cause.message ?? err.cause})` : ''}`);
     }
   }
 }
 
-main();
+process.on('exit', (code) => notice(`finished with exit code ${code}`));
+main().catch((err) => {
+  warn(`crashed: ${err.stack ?? err}`);
+  process.exitCode = 1;
+});
