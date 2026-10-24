@@ -1,0 +1,76 @@
+import { useEffect, useRef } from 'react';
+import {
+  CandlestickSeries,
+  ColorType,
+  createChart,
+  type CandlestickData,
+  type IChartApi,
+  type ISeriesApi,
+  type UTCTimestamp,
+} from 'lightweight-charts';
+import type { Bar } from '../types';
+import type { ReplayView } from '../replay/useReplay';
+
+const toCandle = (b: Bar): CandlestickData => ({ ...b, time: b.time as UTCTimestamp });
+
+interface Props {
+  view: ReplayView;
+  digits: number;
+}
+
+export function ReplayChart({ view, digits }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const drawn = useRef<{ key: string; revealed: number }>({ key: '', revealed: -1 });
+
+  useEffect(() => {
+    const chart = createChart(containerRef.current!, {
+      autoSize: true,
+      layout: { background: { type: ColorType.Solid, color: '#131722' }, textColor: '#b2b5be' },
+      grid: { vertLines: { color: '#1e222d' }, horzLines: { color: '#1e222d' } },
+      timeScale: { timeVisible: true, secondsVisible: false, rightOffset: 10 },
+      crosshair: { mode: 0 },
+    });
+    seriesRef.current = chart.addSeries(CandlestickSeries, {
+      upColor: '#26a69a',
+      downColor: '#ef5350',
+      borderVisible: false,
+      wickUpColor: '#26a69a',
+      wickDownColor: '#ef5350',
+    });
+    chartRef.current = chart;
+    return () => {
+      chart.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
+      drawn.current = { key: '', revealed: -1 };
+    };
+  }, []);
+
+  useEffect(() => {
+    seriesRef.current?.applyOptions({
+      priceFormat: { type: 'price', precision: digits, minMove: 10 ** -digits },
+    });
+  }, [digits]);
+
+  // Append or update only the bars that changed; redraw everything on bigger jumps.
+  useEffect(() => {
+    const series = seriesRef.current;
+    if (!series) return;
+    const prev = drawn.current;
+    const { bars, revealed, current, key } = view;
+    if (prev.key === key && revealed === prev.revealed) {
+      series.update(toCandle(current));
+    } else if (prev.key === key && revealed === prev.revealed + 1) {
+      series.update(toCandle(bars[revealed - 1]));
+      series.update(toCandle(current));
+    } else {
+      series.setData([...bars.slice(0, revealed).map(toCandle), toCandle(current)]);
+      if (prev.key !== key) chartRef.current?.timeScale().scrollToRealTime();
+    }
+    drawn.current = { key, revealed };
+  }, [view]);
+
+  return <div ref={containerRef} className="chart" />;
+}
