@@ -41,27 +41,51 @@ function monthChunks(from, to) {
   return chunks;
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Dukascopy answers 503 when hit too fast, so requests are paced and each month gets
+// a few attempts with a growing pause before it is skipped.
+async function fetchMonth(symbol, start, end) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await getHistoricalRates({
+        instrument: symbol.toLowerCase(),
+        dates: { from: start, to: end },
+        timeframe: 'm1',
+        priceType: 'bid',
+        format: 'array',
+        volumes: false,
+        ignoreFlats: true,
+        useCache: true,
+        cacheFolderPath: '.dukascopy-cache',
+        batchSize: 2,
+        requestIntervalMs: 300,
+        retryCount: 5,
+        pauseBetweenRetriesMs: 3000,
+      });
+    } catch (err) {
+      if (attempt >= 4) throw err;
+      const wait = 30_000 * attempt;
+      process.stdout.write(`(${err.message}; retrying in ${wait / 1000}s) `);
+      await sleep(wait);
+    }
+  }
+}
+
 async function fetchSymbol(symbol, from, to) {
   const bars = [];
   for (const [start, end] of monthChunks(from, to)) {
-    process.stdout.write(`  ${symbol} ${start.toISOString().slice(0, 10)} → ${end.toISOString().slice(0, 10)} ... `);
-    const rows = await getHistoricalRates({
-      instrument: symbol.toLowerCase(),
-      dates: { from: start, to: end },
-      timeframe: 'm1',
-      priceType: 'bid',
-      format: 'array',
-      volumes: false,
-      ignoreFlats: true,
-      useCache: true,
-      cacheFolderPath: '.dukascopy-cache',
-      batchSize: 10,
-      pauseBetweenBatchesMs: 500,
-      retryCount: 3,
-    });
-    const d = DIGITS[symbol] ?? 5;
-    for (const [t, o, h, l, c] of rows) bars.push([Math.floor(t / 1000), round(o, d), round(h, d), round(l, d), round(c, d)]);
-    console.log(`${rows.length} bars`);
+    const label = `${symbol} ${start.toISOString().slice(0, 7)}`;
+    process.stdout.write(`  ${label} ... `);
+    try {
+      const rows = await fetchMonth(symbol, start, end);
+      const d = DIGITS[symbol] ?? 5;
+      for (const [t, o, h, l, c] of rows) bars.push([Math.floor(t / 1000), round(o, d), round(h, d), round(l, d), round(c, d)]);
+      console.log(`${rows.length} bars`);
+    } catch (err) {
+      console.log('failed');
+      warn(`${label} skipped: ${err.message}`);
+    }
   }
   return bars;
 }
