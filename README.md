@@ -42,6 +42,24 @@ Downloaded data lives in `public/data/` and is not committed. You can also impor
 | Speed | bars/s dropdown | |
 | Change timeframe mid-replay | timeframe dropdown | |
 
+## Drawing tools
+
+Use the toolbar on the left of the chart: trend line, horizontal line, vertical line and box. Click once (horizontal/vertical) or twice (trend line, box) to place. With the arrow tool, drag a drawing to move it, drag its handles to reshape it, pick a colour to recolour it, and press Delete to remove it. Drawings are saved per symbol in your browser.
+
+## Indicators and custom scripts
+
+**ƒx Indicators** adds SMA, EMA, Bollinger Bands, RSI and ATR, or a custom script. Every indicator is a small JavaScript script you can edit. Scripts only see bars revealed so far, so there is no look-ahead.
+
+```js
+// Arrays: open, high, low, close, time, bars
+// Helpers: ta.sma, ta.ema, ta.rma, ta.stdev, ta.rsi, ta.atr, ta.tr, ta.highest, ta.lowest
+// Draw: plot(values, { title, color, lineWidth, pane: 'price' | 'new' }), hline(price, { color, pane })
+const fast = ta.ema(close, 9);
+const slow = ta.ema(close, 21);
+plot(fast, { title: 'Fast', color: '#26a69a' });
+plot(slow, { title: 'Slow', color: '#ef5350' });
+```
+
 ## Roadmap
 
 1. ✅ Data and replay chart

@@ -1,11 +1,27 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { symbolSpec } from '../data/symbols';
 import { TIMEFRAMES } from '../data/timeframes';
+import { loadDrawings, saveDrawings, type Drawing, type DrawingTool } from '../drawings/types';
+import type { IndicatorDef } from '../indicators/presets';
 import { SPEEDS, useReplay } from '../replay/useReplay';
+import { COLORS, DrawingToolbar } from './DrawingToolbar';
+import { DrawingLayer } from './DrawingLayer';
+import { IndicatorLayer } from './IndicatorLayer';
+import { IndicatorsDialog } from './IndicatorsDialog';
 import { ReplayChart } from './ReplayChart';
 import type { SessionConfig } from './Setup';
 
 const fmtTime = (t: number) => new Date(t * 1000).toISOString().replace('T', ' ').slice(0, 16);
+
+const INDICATORS_KEY = 'trade-sim:indicators';
+
+function loadIndicators(): IndicatorDef[] {
+  try {
+    return JSON.parse(localStorage.getItem(INDICATORS_KEY) ?? '[]') as IndicatorDef[];
+  } catch {
+    return [];
+  }
+}
 
 export function Replay({ config, onExit }: { config: SessionConfig; onExit: () => void }) {
   const { dataset, startTime } = config;
@@ -13,9 +29,40 @@ export function Replay({ config, onExit }: { config: SessionConfig; onExit: () =
   const replay = useReplay(dataset, tfSeconds, startTime);
   const spec = symbolSpec(dataset.symbol);
 
+  const [drawings, setDrawings] = useState<Drawing[]>(() => loadDrawings(dataset.symbol));
+  const [tool, setTool] = useState<DrawingTool | null>(null);
+  const [color, setColor] = useState(COLORS[0]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const [indicators, setIndicators] = useState<IndicatorDef[]>(loadIndicators);
+  const [indicatorErrors, setIndicatorErrors] = useState<Record<string, string>>({});
+  const [showIndicators, setShowIndicators] = useState(false);
+
+  const changeDrawings = (next: Drawing[]) => {
+    setDrawings(next);
+    saveDrawings(dataset.symbol, next);
+  };
+
+  const changeIndicators = (next: IndicatorDef[]) => {
+    setIndicators(next);
+    try {
+      localStorage.setItem(INDICATORS_KEY, JSON.stringify(next));
+    } catch {
+      // Not persisted.
+    }
+  };
+
+  const changeColor = (c: string) => {
+    setColor(c);
+    if (selectedId) changeDrawings(drawings.map((d) => (d.id === selectedId ? { ...d, color: c } : d)));
+  };
+
+  const onIndicatorErrors = useCallback((e: Record<string, string>) => setIndicatorErrors(e), []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (showIndicators) return;
       if (e.code === 'Space') {
         e.preventDefault();
         replay.togglePlay();
@@ -26,7 +73,7 @@ export function Replay({ config, onExit }: { config: SessionConfig; onExit: () =
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [replay]);
+  }, [replay, showIndicators]);
 
   return (
     <div className="replay">
@@ -42,6 +89,9 @@ export function Replay({ config, onExit }: { config: SessionConfig; onExit: () =
             </option>
           ))}
         </select>
+        <button onClick={() => setShowIndicators(true)}>
+          ƒx Indicators{indicators.some((d) => d.enabled) ? ` (${indicators.filter((d) => d.enabled).length})` : ''}
+        </button>
         <span className="divider" />
         <button onClick={replay.togglePlay} disabled={replay.atEnd} title="Play / pause (Space)">
           {replay.playing ? '❚❚ Pause' : '▶ Play'}
@@ -62,13 +112,54 @@ export function Replay({ config, onExit }: { config: SessionConfig; onExit: () =
       </header>
 
       <main className="body">
-        <ReplayChart view={replay.view} digits={spec.digits} />
+        <DrawingToolbar
+          tool={tool}
+          onTool={setTool}
+          color={color}
+          onColor={changeColor}
+          canDelete={!!selectedId}
+          onDelete={() => {
+            changeDrawings(drawings.filter((d) => d.id !== selectedId));
+            setSelectedId(null);
+          }}
+          onClear={() => {
+            if (drawings.length && confirm('Remove all drawings on this chart?')) changeDrawings([]);
+          }}
+        />
+        <ReplayChart view={replay.view} digits={spec.digits}>
+          {(api) => (
+            <>
+              <IndicatorLayer api={api} view={replay.view} defs={indicators} onErrors={onIndicatorErrors} />
+              <DrawingLayer
+                api={api}
+                bars={replay.view.bars}
+                tfSeconds={tfSeconds}
+                drawings={drawings}
+                onChange={changeDrawings}
+                tool={tool}
+                onToolDone={() => setTool(null)}
+                color={color}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+              />
+            </>
+          )}
+        </ReplayChart>
         <aside className="panel">
           <h3>Positions</h3>
-          <p className="muted">Buy/sell, SL/TP, lot size and pending orders arrive in step 2.</p>
+          <p className="muted">Buy/sell, SL/TP, lot size and pending orders are coming next.</p>
           {replay.atEnd && <p className="notice">End of data reached.</p>}
         </aside>
       </main>
+
+      {showIndicators && (
+        <IndicatorsDialog
+          defs={indicators}
+          errors={indicatorErrors}
+          onChange={changeIndicators}
+          onClose={() => setShowIndicators(false)}
+        />
+      )}
     </div>
   );
 }
