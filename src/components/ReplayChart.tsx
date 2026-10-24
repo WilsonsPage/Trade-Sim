@@ -51,7 +51,9 @@ export function ReplayChart({ view, digits, children }: Props) {
     setApi({ chart, series: seriesRef.current });
     return () => {
       setApi(null);
-      chart.remove();
+      // Layers clean up their series and lines in their own effects, which can run after
+      // this one; removing the chart a tick later keeps them from touching a disposed chart.
+      setTimeout(() => chart.remove());
       chartRef.current = null;
       seriesRef.current = null;
       drawn.current = { key: '', revealed: -1 };

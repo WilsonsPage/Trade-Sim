@@ -114,3 +114,19 @@ button.primary-inline { background: var(--accent); border-color: var(--accent); 
 .loss { color: #ef5350; }
 .small { font-size: 12px; }
 button.link { background: none; border: none; color: var(--accent); padding: 0; font-size: 12px; }
+
+.end-btn { border-color: #f7a600; }
+.sessions { display: flex; flex-direction: column; }
+.session-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+
+.report { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+.report h1 { font-size: 20px; margin: 0; }
+.report h2 { font-size: 15px; margin: 24px 0 8px; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.stat { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 4px; }
+.stat strong { font-size: 16px; }
+.equity-chart { height: 280px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; }

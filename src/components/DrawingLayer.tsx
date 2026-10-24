@@ -137,7 +137,13 @@ export function DrawingLayer(props: Props) {
   useEffect(() => {
     const onClick = () => onSelect(null);
     api.chart.subscribeClick(onClick);
-    return () => api.chart.unsubscribeClick(onClick);
+    return () => {
+      try {
+        api.chart.unsubscribeClick(onClick);
+      } catch {
+        // Chart already removed.
+      }
+    };
   }, [api, onSelect]);
 
   useEffect(() => {

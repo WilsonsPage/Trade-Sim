@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { symbolSpec } from '../data/symbols';
 import { TIMEFRAMES } from '../data/timeframes';
 import { loadDrawings, saveDrawings, type Drawing, type DrawingTool } from '../drawings/types';
 import type { IndicatorDef } from '../indicators/presets';
 import { SPEEDS, useReplay } from '../replay/useReplay';
+import { saveSession, type SavedSession } from '../sessions/sessions';
 import { useTrading } from '../trading/useTrading';
 import { COLORS, DrawingToolbar } from './DrawingToolbar';
 import { DrawingLayer } from './DrawingLayer';
@@ -26,12 +27,63 @@ function loadIndicators(): IndicatorDef[] {
   }
 }
 
-export function Replay({ config, onExit }: { config: SessionConfig; onExit: () => void }) {
+interface Props {
+  config: SessionConfig;
+  onExit: () => void;
+  onEnd: (session: SavedSession) => void;
+}
+
+export function Replay({ config, onExit, onEnd }: Props) {
   const { dataset, startTime } = config;
   const [tfSeconds, setTfSeconds] = useState(config.tfSeconds);
-  const replay = useReplay(dataset, tfSeconds, startTime);
+  const replay = useReplay(dataset, tfSeconds, startTime, config.initialPos);
   const spec = useMemo(() => symbolSpec(dataset.symbol), [dataset.symbol]);
-  const trading = useTrading(dataset, spec, replay.pos, config.startBalance);
+  const trading = useTrading(dataset, spec, replay.pos, config.startBalance, config.initialTrading);
+
+  const snapshot = (trades = trading.state, endedAt: number | null = null): SavedSession => ({
+    id: config.id,
+    symbol: dataset.symbol,
+    source: config.source,
+    tfSeconds,
+    startTime,
+    startBalance: config.startBalance,
+    pos: replay.pos,
+    trading: trades,
+    createdAt: config.createdAt,
+    updatedAt: Date.now(),
+    endedAt,
+  });
+
+  // Autosave shortly after anything changes, so closing the tab loses nothing.
+  const latest = useRef(snapshot);
+  latest.current = snapshot;
+  const [saveError, setSaveError] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => {
+      saveSession(latest.current()).then(() => setSaveError(false), () => setSaveError(true));
+    }, 1000);
+    return () => clearTimeout(id);
+  }, [replay.pos, trading.state, tfSeconds]);
+
+  const ended = useRef(false);
+  useEffect(
+    () => () => {
+      if (!ended.current) saveSession(latest.current()).catch(() => {});
+    },
+    [],
+  );
+
+  const endSession = async () => {
+    const open = trading.state.positions.length + trading.state.orders.length;
+    const msg = open
+      ? `End the session? ${open} open position(s)/order(s) will be closed at the current price.`
+      : 'End the session and see your results?';
+    if (!confirm(msg)) return;
+    ended.current = true;
+    const session = snapshot(trading.end(), Date.now());
+    await saveSession(session).catch(() => setSaveError(true));
+    onEnd(session);
+  };
 
   const [drawings, setDrawings] = useState<Drawing[]>(() => loadDrawings(dataset.symbol));
   const [tool, setTool] = useState<DrawingTool | null>(null);
@@ -82,7 +134,7 @@ export function Replay({ config, onExit }: { config: SessionConfig; onExit: () =
   return (
     <div className="replay">
       <header className="toolbar">
-        <button onClick={onExit} title="Back to setup">
+        <button onClick={onExit} title="Back to sessions (progress is saved)">
           ←
         </button>
         <strong>{dataset.symbol}</strong>
@@ -111,8 +163,12 @@ export function Replay({ config, onExit }: { config: SessionConfig; onExit: () =
           ))}
         </select>
         <span className="spacer" />
+        {saveError && <span className="error small">Not saved</span>}
         <span className="muted">{fmtTime(replay.time)} UTC</span>
         <strong>{replay.price.toFixed(spec.digits)}</strong>
+        <button className="end-btn" onClick={endSession}>
+          End session
+        </button>
       </header>
 
       <main className="body">

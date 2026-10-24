@@ -30,7 +30,11 @@ export function TradeLines({ api, state, tfSeconds, now }: Props) {
   useEffect(() => {
     markers.current = createSeriesMarkers(api.series, []);
     return () => {
-      markers.current?.detach();
+      try {
+        markers.current?.detach();
+      } catch {
+        // Chart already removed.
+      }
       markers.current = null;
     };
   }, [api]);

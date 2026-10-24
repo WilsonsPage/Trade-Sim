@@ -155,3 +155,9 @@ export function processBar(state: TradingState, spec: SymbolSpec, bar: Bar): Tra
   }
   return s;
 }
+
+/** Closes all positions at `price` and drops pending orders. */
+export function endSession(state: TradingState, spec: SymbolSpec, price: number, time: number): TradingState {
+  const closed = state.positions.reduce((s, p) => closePosition(s, spec, p.id, price, time, 'end'), state);
+  return { ...closed, orders: [] };
+}

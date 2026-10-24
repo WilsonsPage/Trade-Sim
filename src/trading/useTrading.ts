@@ -5,8 +5,14 @@ import * as engine from './engine';
 import type { PendingOrder, Position, Side } from './engine';
 
 /** Runs the trading engine alongside the replay, minute by minute. */
-export function useTrading(dataset: Dataset, spec: SymbolSpec, pos: number, startBalance: number) {
-  const [state, setState] = useState(() => engine.initialState(startBalance, dataset.bars[pos].time));
+export function useTrading(
+  dataset: Dataset,
+  spec: SymbolSpec,
+  pos: number,
+  startBalance: number,
+  initial?: engine.TradingState,
+) {
+  const [state, setState] = useState(() => initial ?? engine.initialState(startBalance, dataset.bars[pos].time));
   const processed = useRef(pos);
 
   useEffect(() => {
@@ -40,6 +46,12 @@ export function useTrading(dataset: Dataset, spec: SymbolSpec, pos: number, star
     closeAll: () =>
       setState((s) => s.positions.reduce((acc: engine.TradingState, p: Position) =>
         engine.closePosition(acc, spec, p.id, price, bar.time, 'manual'), s)),
+    /** Closes every position at the current price and cancels pending orders. */
+    end: () => {
+      const ended = engine.endSession(state, spec, price, bar.time);
+      setState(ended);
+      return ended;
+    },
     modify: (id: string, sl: number | null, tp: number | null) => setState((s) => engine.modifyPosition(s, id, sl, tp)),
   };
 }

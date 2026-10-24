@@ -72,9 +72,13 @@ The right-hand panel works like the MT5 mobile app:
 
 Orders fill on M1 data inside each chart bar. If SL and TP are both touched in the same minute, the stop loss is assumed to hit first, and a gap through a level fills at the open. P/L is in USD (USD-based pairs such as USDJPY are converted at the exit price). Spread and commission are not modelled yet.
 
+## Sessions and stats
+
+Every session autosaves in your browser (IndexedDB) as you replay and trade. Use **←** to leave, then **Resume** it later from the start screen. **End session** closes anything open at the current price and shows the report: net P/L, return, trade count, strike rate, profit factor, max drawdown, average R, expectancy, average/largest win and loss, streaks, average hold time, a long/short split, an equity curve and the full trade list. Finished sessions stay listed so you can compare them.
+
 ## Roadmap
 
 1. ✅ Data and replay chart
 2. ✅ Drawing tools, indicators and trading engine
-3. Saved sessions and end-of-session stats (trades, PnL, strike rate, drawdown, equity curve)
+3. ✅ Saved sessions and end-of-session stats
 4. Polish and mobile (installable PWA)
