@@ -126,7 +126,12 @@ async function main() {
   if (source === 'histdata') {
     for (const symbol of symbols) {
       const d = DIGITS[symbol] ?? 5;
-      const rows = await fetchHistdata(symbol, from, to, warn);
+      const skipped = [];
+      const rows = await fetchHistdata(symbol, from, to, (m) => {
+        console.warn(`  ${m}`);
+        skipped.push(m.split(' ')[1]);
+      });
+      if (skipped.length) warn(`${symbol}: skipped ${skipped.join(', ')}`);
       bars[symbol] = rows.map(([t, o, h, l, c]) => [t, round(o, d), round(h, d), round(l, d), round(c, d)]);
     }
   } else outer: for (const [start, end] of monthChunks(from, to).reverse()) {
@@ -163,7 +168,6 @@ async function main() {
     index = index.filter((d) => d.symbol !== symbol);
     index.push({ symbol, file, from: list[0][0], to: list[list.length - 1][0], count: list.length });
     console.log(`  saved ${file} (${list.length} bars)`);
-    notice(`${symbol}: saved ${list.length} bars`);
   }
   // GitHub shows only 10 annotations of each kind per step, so also give one line for everything.
   notice(`bars per symbol: ${summary.join(', ')}`);
