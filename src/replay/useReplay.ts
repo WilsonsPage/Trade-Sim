@@ -70,6 +70,11 @@ export function useReplay(dataset: Dataset, tfSeconds: number, startTime: number
     setSpeed,
     step,
     togglePlay: () => setPlaying((p) => !p && !atEnd),
+    /** Jumps to raw bar `p` and pauses. */
+    seek: (p: number) => {
+      setPlaying(false);
+      setPos(Math.max(0, Math.min(p, dataset.bars.length - 1)));
+    },
   };
 }
 

@@ -4,6 +4,9 @@ import type { Dataset } from '../types';
 import * as engine from './engine';
 import type { PendingOrder, Position, Side } from './engine';
 
+/** How many replay steps can be undone. */
+const MAX_REWIND = 5000;
+
 /** Runs the trading engine alongside the replay, minute by minute. */
 export function useTrading(
   dataset: Dataset,
@@ -18,6 +21,11 @@ export function useTrading(
       engine.initialState(costs.startBalance, dataset.bars[pos].time, costs.spread, costs.commission),
   );
   const processed = useRef(pos);
+  const latest = useRef(state);
+  latest.current = state;
+  // Account snapshots from before each replay step, so steps can be rewound exactly.
+  const timeline = useRef<{ pos: number; state: engine.TradingState }[]>([]);
+  const [rewindable, setRewindable] = useState(0);
 
   useEffect(() => {
     const from = processed.current;
@@ -26,6 +34,9 @@ export function useTrading(
       return;
     }
     processed.current = pos;
+    timeline.current.push({ pos: from, state: latest.current });
+    if (timeline.current.length > MAX_REWIND) timeline.current.shift();
+    setRewindable(timeline.current.length);
     setState((s) => {
       for (let i = from + 1; i <= pos; i++) s = engine.processBar(s, spec, dataset.bars[i]);
       return s;
@@ -71,6 +82,22 @@ export function useTrading(
     modifyOrder: (id: string, fields: Partial<Pick<PendingOrder, 'price' | 'sl' | 'tp'>>) =>
       setState((s) => engine.modifyOrder(s, id, fields)),
     modify: (id: string, sl: number | null, tp: number | null) => setState((s) => engine.modifyPosition(s, id, sl, tp)),
+    setAutoBreakeven: (r: number | null) => setState((s) => ({ ...s, autoBreakevenR: r })),
+    /** Steps that can be undone. */
+    rewindable,
+    /**
+     * Restores the account to before the last replay step and returns the replay position
+     * to go back to, or null if there is nothing to rewind.
+     */
+    rewind: (): number | null => {
+      const last = timeline.current.pop();
+      if (!last) return null;
+      setRewindable(timeline.current.length);
+      processed.current = last.pos;
+      // Keep the auto-breakeven setting as it is now.
+      setState((s) => ({ ...last.state, autoBreakevenR: s.autoBreakevenR }));
+      return last.pos;
+    },
   };
 }
 

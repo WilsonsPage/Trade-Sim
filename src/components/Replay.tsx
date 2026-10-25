@@ -13,6 +13,8 @@ import { IndicatorLayer } from './IndicatorLayer';
 import { IndicatorsDialog } from './IndicatorsDialog';
 import { ReplayChart } from './ReplayChart';
 import { ChartOrderMenu } from './ChartOrderMenu';
+import { GoToMenu } from './GoToMenu';
+import { indexAtTime } from '../data/aggregate';
 import { TradeLines, type DragTarget, type LineAction } from './TradeLines';
 import { TradePanel } from './TradePanel';
 import type { SessionConfig } from './Setup';
@@ -190,6 +192,16 @@ export function Replay({ config, onExit, onEnd }: Props) {
     return true;
   };
 
+  const stepBack = () => {
+    const p = trading.rewind();
+    if (p !== null) replay.seek(p);
+  };
+
+  const goTo = (time: number) => {
+    const bars = dataset.bars;
+    replay.seek(bars[bars.length - 1].time < time ? bars.length - 1 : indexAtTime(bars, time) - 1);
+  };
+
   const onLineAction = (a: LineAction) => {
     if (a.type === 'close') trading.close(a.id);
     else if (a.type === 'cancel') trading.cancelOrder(a.id);
@@ -212,11 +224,14 @@ export function Replay({ config, onExit, onEnd }: Props) {
       } else if (e.code === 'ArrowRight') {
         e.preventDefault();
         replay.step();
+      } else if (e.code === 'ArrowLeft') {
+        e.preventDefault();
+        stepBack();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [replay, indicatorsFor]);
+  });
 
   const drawingProps = {
     tool,
@@ -238,6 +253,9 @@ export function Replay({ config, onExit, onEnd }: Props) {
         </select>
         <button onClick={() => setIndicatorsFor(1)}>ƒx Indicators{indicators.enabled ? ` (${indicators.enabled})` : ''}</button>
         <span className="divider" />
+        <button onClick={stepBack} disabled={!trading.rewindable} title="Step back, undoing anything that happened (←)">
+          ⏮ Back
+        </button>
         <button onClick={replay.togglePlay} disabled={replay.atEnd} title="Play / pause (Space)">
           {replay.playing ? '❚❚ Pause' : '▶ Play'}
         </button>
@@ -251,6 +269,7 @@ export function Replay({ config, onExit, onEnd }: Props) {
             </option>
           ))}
         </select>
+        <GoToMenu now={replay.time} end={dataset.bars[dataset.bars.length - 1].time} onGo={goTo} />
         {second && (
           <button className="layout-btn" onClick={toggleLayout} title={stacked ? 'Show charts side by side' : 'Stack charts'}>
             {stacked ? '◫' : '⬒'}

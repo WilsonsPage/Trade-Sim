@@ -48,6 +48,7 @@ function PositionRow({ p, trading, spec }: { p: Position; trading: Trading; spec
         <div className="grow">
           <div>
             <strong>{spec.symbol}</strong>, <span className={p.side}>{p.side} {p.lots.toFixed(2)}</span>
+            {p.atBreakeven && <span className="badge">BE</span>}
           </div>
           <div className="muted small">
             {p.entryPrice.toFixed(spec.digits)} → {mark.toFixed(spec.digits)}
@@ -236,6 +237,21 @@ export function TradePanel({ trading, spec }: { trading: Trading; spec: SymbolSp
               </button>
             )}
           </div>
+
+          <label className="field row be-setting">
+            <span className="grow">Auto breakeven (moves SL to entry)</span>
+            <select
+              value={state.autoBreakevenR ?? ''}
+              onChange={(e) => trading.setAutoBreakeven(e.target.value ? Number(e.target.value) : null)}
+            >
+              <option value="">Off</option>
+              {[0.5, 1, 1.5, 2, 3].map((r) => (
+                <option key={r} value={r}>
+                  at +{r}R
+                </option>
+              ))}
+            </select>
+          </label>
 
           <h4>
             Positions ({state.positions.length})

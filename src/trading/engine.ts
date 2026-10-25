@@ -24,6 +24,10 @@ export interface Position {
   entryTime: number;
   sl: number | null;
   tp: number | null;
+  /** Distance from entry to the first stop loss (1R), for auto breakeven. */
+  risk?: number | null;
+  /** Set once auto breakeven has moved the stop to entry. */
+  atBreakeven?: boolean;
 }
 
 export interface ClosedTrade extends Position {
@@ -46,6 +50,8 @@ export interface TradingState {
   history: ClosedTrade[];
   /** Equity after each closed trade, starting with the opening balance, for drawdown stats. */
   equityCurve: { time: number; equity: number }[];
+  /** Move the stop to entry once a trade is this many R in profit; null is off. */
+  autoBreakevenR?: number | null;
 }
 
 export function initialState(startBalance: number, time: number, spread = 0, commission = 0): TradingState {
@@ -93,7 +99,8 @@ export function openPosition(
   price: number,
   time: number,
 ): TradingState {
-  const position: Position = { ...order, id: crypto.randomUUID(), entryPrice: price, entryTime: time };
+  const risk = order.sl === null ? null : Math.abs(price - order.sl);
+  const position: Position = { ...order, id: crypto.randomUUID(), entryPrice: price, entryTime: time, risk };
   return { ...state, positions: [...state.positions, position] };
 }
 
@@ -135,7 +142,12 @@ export function modifyOrder(
 }
 
 export function modifyPosition(state: TradingState, id: string, sl: number | null, tp: number | null): TradingState {
-  return { ...state, positions: state.positions.map((p) => (p.id === id ? { ...p, sl, tp } : p)) };
+  return {
+    ...state,
+    positions: state.positions.map((p) =>
+      p.id === id ? { ...p, sl, tp, risk: p.risk ?? (sl === null ? null : Math.abs(p.entryPrice - sl)) } : p,
+    ),
+  };
 }
 
 /** Whether a pending order triggers in this bar, and at what price (the open if price gapped through). */
@@ -182,6 +194,23 @@ export function processBar(state: TradingState, spec: SymbolSpec, bar: Bar): Tra
   for (const p of s.positions) {
     const exit = exitFill(p, p.side === 'buy' ? bar : ask);
     if (exit) s = closePosition(s, spec, p.id, exit.price, bar.time, exit.reason);
+  }
+  // Auto breakeven is checked after exits, so a minute that hits both the trigger and the
+  // old stop is treated as a stop-out, the same cautious rule as SL-before-TP.
+  const beR = s.autoBreakevenR ?? null;
+  if (beR !== null) {
+    for (const p of s.positions) {
+      const long = p.side === 'buy';
+      // Skip trades without a stop, and stops already at or past entry (e.g. trailed by hand).
+      if (p.atBreakeven || !p.risk || p.sl === null || (long ? p.sl >= p.entryPrice : p.sl <= p.entryPrice)) continue;
+      const trigger = p.entryPrice + (long ? 1 : -1) * beR * p.risk;
+      if (long ? bar.high >= trigger : ask.low <= trigger) {
+        s = {
+          ...s,
+          positions: s.positions.map((x) => (x.id === p.id ? { ...x, sl: p.entryPrice, atBreakeven: true } : x)),
+        };
+      }
+    }
   }
   return s;
 }

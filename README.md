@@ -39,6 +39,8 @@ Downloaded data lives in `public/data/` and is not committed. You can also impor
 | Action | Button | Key |
 | --- | --- | --- |
 | Next bar | ⏭ Step | → |
+| Step back (undoes anything that happened in that step) | ⏮ Back | ← |
+| Jump to the next Tokyo / London / New York open, or a date | Go to ▾ | |
 | Play / pause | ▶ Play | Space |
 | Speed | bars/s dropdown | |
 | Change timeframe mid-replay | timeframe dropdown | |
@@ -75,6 +77,7 @@ The right-hand panel works like the MT5 mobile app:
 - **History**: closed trades with exit reason (SL, TP or manual).
 - Entries, SL/TP and pending orders appear as lines on the chart, and fills as markers. **Drag** an SL, TP or pending-order line to move it (invalid levels snap back). Dragging an order's entry carries its SL and TP with it.
 - **Trade from the chart**: right-click (long-press on a phone) at a price to place a buy/sell limit or stop there. Each order and position line has **TP** and **SL** buttons that add the level, ready to drag into place, and **✕** to cancel, close or remove a level.
+- **Auto breakeven**: under the order form, choose *at +1R* (or 0.5R–3R) and the stop loss moves to entry once a trade is that far in profit. Trades show a **BE** badge when it has happened.
 - **Risk sizing**: switch *Volume (lots)* to *Risk (% of balance)* and the lot size is worked out from your stop loss.
 - **Costs**: set spread (pips) and commission ($ per lot, round turn) when starting a session. Buys open at the ask and close at the bid; sells the other way round.
 

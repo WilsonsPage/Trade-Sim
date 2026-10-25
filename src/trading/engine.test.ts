@@ -86,3 +86,24 @@ describe('spread and commission', () => {
     expect(s.positions[0].entryPrice).toBe(1.1);
   });
 });
+
+describe('auto breakeven', () => {
+  const start = { ...initialState(10_000, 0), autoBreakevenR: 1 };
+
+  it('moves the stop to entry once the trade is 1R in profit', () => {
+    let s = openPosition(start, { side: 'buy', lots: 1, sl: 1.099, tp: null }, 1.1, 0);
+    s = processBar(s, eurusd, bar(1.1, 1.1009, 1.0995, 1.1005));
+    expect(s.positions[0].sl).toBe(1.099);
+    s = processBar(s, eurusd, bar(1.1005, 1.1011, 1.1002, 1.1008));
+    expect(s.positions[0]).toMatchObject({ sl: 1.1, atBreakeven: true });
+    s = processBar(s, eurusd, bar(1.1008, 1.1008, 1.0999, 1.1));
+    expect(s.history[0]).toMatchObject({ reason: 'sl', exitPrice: 1.1, pnl: 0 });
+  });
+
+  it('works for shorts and leaves trades without a stop alone', () => {
+    let s = openPosition(start, { side: 'sell', lots: 1, sl: 1.101, tp: null }, 1.1, 0);
+    s = openPosition(s, { side: 'sell', lots: 1, sl: null, tp: null }, 1.1, 0);
+    s = processBar(s, eurusd, bar(1.1, 1.1002, 1.0989, 1.0995));
+    expect(s.positions.map((p) => p.sl)).toEqual([1.1, null]);
+  });
+});
