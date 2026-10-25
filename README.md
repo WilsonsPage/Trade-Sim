@@ -4,7 +4,7 @@ A bar-replay trading simulator: replay historical charts bar by bar, take fake t
 
 ## Use it
 
-Open **https://wilsonspage.github.io/Trade-Sim/** in Chrome or Edge. Nothing to install, and market data for forex majors and gold (last 12 months, refreshed weekly) is already included.
+Open **https://wilsonspage.github.io/Trade-Sim/** in Chrome or Edge. Nothing to install, and no account. Market data for the last 12 months, refreshed weekly, is already included: the forex majors, gold, silver, the US dollar index, the S&P 500, the Nasdaq 100 and Brent oil.
 
 To get it as an app:
 
@@ -20,7 +20,7 @@ Needs [Node.js](https://nodejs.org) 20 or newer.
 
 ```bash
 npm install
-npm run fetch-data      # download ~6 months of M1 data for forex majors and gold (free, from histdata.com)
+npm run fetch-data      # download ~6 months of M1 data for all markets (free, from histdata.com)
 npm run dev             # open the printed http://localhost:5173 link
 ```
 
@@ -39,9 +39,15 @@ Downloaded data lives in `public/data/` and is not committed. You can also impor
 | Action | Button | Key |
 | --- | --- | --- |
 | Next bar | ⏭ Step | → |
+| Step back (undoes anything that happened in that step) | ⏮ Back | ← |
+| Jump to the next Tokyo / London / New York open, or a date | Go to ▾ | |
 | Play / pause | ▶ Play | Space |
 | Speed | bars/s dropdown | |
 | Change timeframe mid-replay | timeframe dropdown | |
+
+## Split screen
+
+When starting a session, pick a **second chart** (optional) to watch another market next to the one you trade, for example EURUSD with the dollar index. Both charts replay in sync from the same date, and each has its own timeframe, indicators and drawings. On a laptop, the ⬒ button switches between side by side and stacked. Trading happens on the first chart.
 
 ## Drawing tools
 
@@ -69,15 +75,35 @@ The right-hand panel works like the MT5 mobile app:
 - **Pending orders**: Buy Limit, Sell Limit, Buy Stop and Sell Stop at a price you choose, with optional SL/TP.
 - **Positions**: live P/L. Tap a position to modify SL/TP or close it.
 - **History**: closed trades with exit reason (SL, TP or manual).
-- Entries, SL/TP and pending orders appear as lines on the chart, and fills as markers. **Drag** an SL, TP or pending-order line to move it (invalid levels snap back).
+- Entries, SL/TP and pending orders appear as lines on the chart, and fills as markers. **Drag** an SL, TP or pending-order line to move it (invalid levels snap back). Dragging an order's entry carries its SL and TP with it.
+- **Trade from the chart**: right-click (long-press on a phone) at a price to place a buy/sell limit or stop there. Each order and position line has **TP** and **SL** buttons that add the level, ready to drag into place, and **✕** to cancel, close or remove a level.
+- **Auto breakeven**: under the order form, choose *at +1R* (or 0.5R–3R) and the stop loss moves to entry once a trade is that far in profit. Trades show a **BE** badge when it has happened.
 - **Risk sizing**: switch *Volume (lots)* to *Risk (% of balance)* and the lot size is worked out from your stop loss.
 - **Costs**: set spread (pips) and commission ($ per lot, round turn) when starting a session. Buys open at the ask and close at the bid; sells the other way round.
 
 Orders fill on M1 data inside each chart bar. If SL and TP are both touched in the same minute, the stop loss is assumed to hit first, and a gap through a level fills at the open. P/L is in USD (USD-based pairs such as USDJPY are converted at the exit price) and includes commission. Swap and margin are not modelled.
 
+## Journal and analytics
+
+Tap any open position or closed trade (History tab) to add **notes**, **tags** (e.g. *breakout, A+ setup, FOMO*) and a **📷 screenshot** of the chart, drawings included. The end-of-session report adds a **P/L calendar**, results by **session**, **day of week**, **hour** and **tag** (trades, win rate and P/L for each), and your notes, tags and screenshots next to every trade. Screenshots are stored in your browser with the session and deleted with it.
+
+## Prop firm challenge mode
+
+When starting a session, pick a **Challenge**: *2-step phase 1* (8% target, 5% daily loss, 10% max loss, 4 trading days), *phase 2* (5% / 5% / 10%), *1-step* (10% / 3% / 6%) or your own numbers. The panel tracks progress to the target and how much loss room is left. Like a real evaluation, limits use equity including open trades (at the worst price each minute), the daily limit resets at 00:00 UTC from that day's starting balance, and breaking a limit closes everything and stops trading. The challenge passes once the target is banked with no trades open and the minimum trading days are met. The result shows on the session list and in the report.
+
 ## Sessions and stats
 
 Every session autosaves in your browser (IndexedDB) as you replay and trade. Use **←** to leave, then **Resume** it later from the start screen. **End session** closes anything open at the current price and shows the report: net P/L, return, trade count, strike rate, profit factor, max drawdown, average R, expectancy, average/largest win and loss, streaks, average hold time, a long/short split, an equity curve and the full trade list. Finished sessions stay listed so you can compare them.
+
+## Privacy and security
+
+- **No accounts, nothing uploaded.** Sessions, drawings and indicators are saved only in the browser on the device you use (IndexedDB and local storage). Each device and browser has its own separate sessions. Clearing your browser's site data deletes them.
+- **No server.** The site is static files on GitHub Pages; the market data is bundled with it.
+- **Content Security Policy.** The page only loads its own scripts, styles and data, and can't send anything to other sites.
+- **Sandboxed indicator scripts.** Custom scripts run in a separate worker with network, storage and other browser APIs removed, and are stopped after 2 seconds, so a script copied from someone else can't read or delete your sessions, contact other sites, or freeze the app.
+- **Updates.** Dependabot opens pull requests for library and GitHub Actions updates, and each pull request is tested and built before it can be merged.
+
+Found a security problem? Please report it privately through the repository's **Security → Report a vulnerability** page rather than in a public issue.
 
 ## Roadmap
 
@@ -85,3 +111,5 @@ Every session autosaves in your browser (IndexedDB) as you replay and trade. Use
 2. ✅ Drawing tools, indicators and trading engine
 3. ✅ Saved sessions and end-of-session stats
 4. ✅ Polish and mobile: phone layout, draggable levels, spread/commission, risk sizing, compact data
+5. ✅ Split screen with a second market, more markets, security hardening
+6. ✅ Trading from the chart, step back, go to session, auto breakeven, prop firm challenges, journal and analytics

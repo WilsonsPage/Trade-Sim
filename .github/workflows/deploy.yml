@@ -1,4 +1,5 @@
 # Builds the app with fresh market data and publishes it to GitHub Pages.
+# Pull requests (including Dependabot updates) are tested and built but not published.
 name: Deploy
 
 on:
@@ -6,15 +7,15 @@ on:
     branches: [main]
   schedule:
     - cron: '0 6 * * 1' # every Monday, to pick up newly published data
+  pull_request:
   workflow_dispatch:
 
+# Least privilege: only the deploy job may publish.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -29,11 +30,13 @@ jobs:
       - run: npm ci
       - run: npm test
       - uses: actions/cache@v4
+        if: github.event_name != 'pull_request'
         with:
           path: .histdata-cache
           key: histdata-${{ github.run_id }}
           restore-keys: histdata-
       - name: Download market data (last 12 months)
+        if: github.event_name != 'pull_request'
         # From histdata.com (Dukascopy blocks GitHub's servers). The site still deploys
         # with whatever data it got, plus demo data and CSV import.
         continue-on-error: true
@@ -43,13 +46,17 @@ jobs:
         env:
           BASE_PATH: /${{ github.event.repository.name }}/
       - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
         with:
           path: dist
 
   deploy:
     needs: build
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

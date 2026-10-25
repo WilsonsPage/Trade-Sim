@@ -76,8 +76,8 @@ export function ReplayChart({ view, digits, children }: Props) {
     const { bars, revealed, current, key } = view;
     if (prev.key === key && revealed === prev.revealed) {
       series.update(toCandle(current));
-    } else if (prev.key === key && revealed === prev.revealed + 1) {
-      series.update(toCandle(bars[revealed - 1]));
+    } else if (prev.key === key && revealed > prev.revealed && revealed - prev.revealed <= 500) {
+      for (let i = prev.revealed; i < revealed; i++) series.update(toCandle(bars[i]));
       series.update(toCandle(current));
     } else {
       series.setData([...bars.slice(0, revealed).map(toCandle), toCandle(current)]);

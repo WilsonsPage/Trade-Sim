@@ -15,9 +15,14 @@ import { fetchHistdata } from './histdata.mjs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const SYMBOLS = ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD', 'XAUUSD'];
+const SYMBOLS = [
+  'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD',
+  'XAUUSD', 'XAGUSD', // gold, silver
+  'UDXUSD', 'SPXUSD', 'NSXUSD', // US dollar index, S&P 500, Nasdaq 100 (histdata.com only)
+  'BCOUSD', // Brent crude oil (histdata.com only; its WTI files have long gaps)
+];
 const OUT_DIR = path.resolve('public/data');
-const DIGITS = { USDJPY: 3, XAUUSD: 3 };
+const DIGITS = { USDJPY: 3, XAUUSD: 3, XAGUSD: 3, UDXUSD: 3, SPXUSD: 3, NSXUSD: 3, BCOUSD: 3 };
 const round = (n, d) => Math.round(n * 10 ** d) / 10 ** d;
 
 function parseArgs(argv) {
@@ -121,7 +126,12 @@ async function main() {
   if (source === 'histdata') {
     for (const symbol of symbols) {
       const d = DIGITS[symbol] ?? 5;
-      const rows = await fetchHistdata(symbol, from, to, warn);
+      const skipped = [];
+      const rows = await fetchHistdata(symbol, from, to, (m) => {
+        console.warn(`  ${m}`);
+        skipped.push(m.split(' ')[1]);
+      });
+      if (skipped.length) warn(`${symbol}: skipped ${skipped.join(', ')}`);
       bars[symbol] = rows.map(([t, o, h, l, c]) => [t, round(o, d), round(h, d), round(l, d), round(c, d)]);
     }
   } else outer: for (const [start, end] of monthChunks(from, to).reverse()) {
@@ -145,8 +155,10 @@ async function main() {
     }
   }
 
+  const summary = [];
   for (const symbol of symbols) {
     const list = bars[symbol].sort((a, b) => a[0] - b[0]);
+    summary.push(`${symbol} ${list.length}`);
     if (!list.length) {
       warn(`${symbol}: no data downloaded`);
       continue;
@@ -156,8 +168,9 @@ async function main() {
     index = index.filter((d) => d.symbol !== symbol);
     index.push({ symbol, file, from: list[0][0], to: list[list.length - 1][0], count: list.length });
     console.log(`  saved ${file} (${list.length} bars)`);
-    notice(`${symbol}: saved ${list.length} bars`);
   }
+  // GitHub shows only 10 annotations of each kind per step, so also give one line for everything.
+  notice(`bars per symbol: ${summary.join(', ')}`);
   index.sort((a, b) => SYMBOLS.indexOf(a.symbol) - SYMBOLS.indexOf(b.symbol));
   await writeFile(path.join(OUT_DIR, 'index.json'), JSON.stringify(index, null, 2));
 }

@@ -24,6 +24,22 @@ export interface Position {
   entryTime: number;
   sl: number | null;
   tp: number | null;
+  /** Distance from entry to the first stop loss (1R), for auto breakeven. */
+  risk?: number | null;
+  /** Set once auto breakeven has moved the stop to entry. */
+  atBreakeven?: boolean;
+  /** Journal: the trader's notes, tags, and whether a chart screenshot is stored. */
+  note?: string;
+  tags?: string[];
+  hasShot?: boolean;
+}
+
+export type JournalFields = Partial<Pick<Position, 'note' | 'tags' | 'hasShot'>>;
+
+/** Updates journal fields on an open position or a closed trade. */
+export function annotate(state: TradingState, id: string, fields: JournalFields): TradingState {
+  const apply = <T extends Position>(list: T[]) => list.map((t) => (t.id === id ? { ...t, ...fields } : t));
+  return { ...state, positions: apply(state.positions), history: apply(state.history) };
 }
 
 export interface ClosedTrade extends Position {
@@ -46,6 +62,82 @@ export interface TradingState {
   history: ClosedTrade[];
   /** Equity after each closed trade, starting with the opening balance, for drawdown stats. */
   equityCurve: { time: number; equity: number }[];
+  /** Move the stop to entry once a trade is this many R in profit; null is off. */
+  autoBreakevenR?: number | null;
+  /** Prop firm style challenge rules and progress, if this session is a challenge. */
+  challenge?: Challenge;
+}
+
+/** Limits are fractions of the starting balance, e.g. 0.08 for 8%. */
+export interface ChallengeRules {
+  name: string;
+  profitTarget: number;
+  /** Max loss within one day (UTC), measured from that day's starting balance. */
+  dailyLoss: number;
+  /** Max loss overall, measured from the starting balance. */
+  maxLoss: number;
+  minTradingDays: number;
+}
+
+export interface Challenge {
+  rules: ChallengeRules;
+  /** UTC day number and the balance at its start, for the daily loss limit. */
+  day: number;
+  dayStartBalance: number;
+  status: 'active' | 'passed' | 'failed';
+  /** Why the challenge failed, and when it passed or failed. */
+  reason?: string;
+  decidedAt?: number;
+}
+
+const DAY = 86_400;
+
+export function startChallenge(state: TradingState, rules: ChallengeRules, time: number): TradingState {
+  return { ...state, challenge: { rules, day: Math.floor(time / DAY), dayStartBalance: state.balance, status: 'active' } };
+}
+
+/** Number of different UTC days on which a trade was opened. */
+export function tradingDays(state: TradingState): number {
+  return new Set([...state.history, ...state.positions].map((p) => Math.floor(p.entryTime / DAY))).size;
+}
+
+/** Checks challenge limits after a bar, closing everything if one is broken. */
+function checkChallenge(state: TradingState, spec: SymbolSpec, bar: Bar, ask: Bar): TradingState {
+  const c = state.challenge;
+  if (!c || c.status === 'failed') return state;
+  let s = state;
+  const day = Math.floor(bar.time / DAY);
+  if (day !== c.day) s = { ...s, challenge: { ...c, day, dayStartBalance: s.balance } };
+  const ch = s.challenge!;
+  const { rules } = ch;
+  const start = s.startBalance;
+
+  // Equity at the worst price each position saw in this minute.
+  const worst = s.positions.reduce(
+    (sum, p) =>
+      sum + pnlUsd(spec, p.side, p.lots, p.entryPrice, p.side === 'buy' ? bar.low : ask.high) - (s.commission ?? 0) * p.lots,
+    s.balance,
+  );
+  const reason =
+    worst <= start * (1 - rules.maxLoss)
+      ? `Max loss limit (${(rules.maxLoss * 100).toFixed(1)}%) broken`
+      : worst <= ch.dayStartBalance - rules.dailyLoss * start
+        ? `Daily loss limit (${(rules.dailyLoss * 100).toFixed(1)}%) broken`
+        : null;
+  if (reason) {
+    // Like a real challenge, the account is stopped out: everything closes at this bar's close.
+    const closed = endSession(s, spec, bar.close, bar.time);
+    return { ...closed, challenge: { ...ch, status: 'failed', reason, decidedAt: bar.time } };
+  }
+  if (
+    ch.status === 'active' &&
+    s.positions.length === 0 &&
+    s.balance >= start * (1 + rules.profitTarget) &&
+    tradingDays(s) >= rules.minTradingDays
+  ) {
+    return { ...s, challenge: { ...ch, status: 'passed', decidedAt: bar.time } };
+  }
+  return s;
 }
 
 export function initialState(startBalance: number, time: number, spread = 0, commission = 0): TradingState {
@@ -93,7 +185,8 @@ export function openPosition(
   price: number,
   time: number,
 ): TradingState {
-  const position: Position = { ...order, id: crypto.randomUUID(), entryPrice: price, entryTime: time };
+  const risk = order.sl === null ? null : Math.abs(price - order.sl);
+  const position: Position = { ...order, id: crypto.randomUUID(), entryPrice: price, entryTime: time, risk };
   return { ...state, positions: [...state.positions, position] };
 }
 
@@ -135,7 +228,12 @@ export function modifyOrder(
 }
 
 export function modifyPosition(state: TradingState, id: string, sl: number | null, tp: number | null): TradingState {
-  return { ...state, positions: state.positions.map((p) => (p.id === id ? { ...p, sl, tp } : p)) };
+  return {
+    ...state,
+    positions: state.positions.map((p) =>
+      p.id === id ? { ...p, sl, tp, risk: p.risk ?? (sl === null ? null : Math.abs(p.entryPrice - sl)) } : p,
+    ),
+  };
 }
 
 /** Whether a pending order triggers in this bar, and at what price (the open if price gapped through). */
@@ -183,7 +281,24 @@ export function processBar(state: TradingState, spec: SymbolSpec, bar: Bar): Tra
     const exit = exitFill(p, p.side === 'buy' ? bar : ask);
     if (exit) s = closePosition(s, spec, p.id, exit.price, bar.time, exit.reason);
   }
-  return s;
+  // Auto breakeven is checked after exits, so a minute that hits both the trigger and the
+  // old stop is treated as a stop-out, the same cautious rule as SL-before-TP.
+  const beR = s.autoBreakevenR ?? null;
+  if (beR !== null) {
+    for (const p of s.positions) {
+      const long = p.side === 'buy';
+      // Skip trades without a stop, and stops already at or past entry (e.g. trailed by hand).
+      if (p.atBreakeven || !p.risk || p.sl === null || (long ? p.sl >= p.entryPrice : p.sl <= p.entryPrice)) continue;
+      const trigger = p.entryPrice + (long ? 1 : -1) * beR * p.risk;
+      if (long ? bar.high >= trigger : ask.low <= trigger) {
+        s = {
+          ...s,
+          positions: s.positions.map((x) => (x.id === p.id ? { ...x, sl: p.entryPrice, atBreakeven: true } : x)),
+        };
+      }
+    }
+  }
+  return checkChallenge(s, spec, bar, ask);
 }
 
 /** Closes all positions at `price` and drops pending orders. */

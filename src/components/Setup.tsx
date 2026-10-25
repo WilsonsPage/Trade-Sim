@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { demoDataset, loadDataset, loadIndex, parseCsv, type DatasetInfo } from '../data/load';
-import { symbolSpec } from '../data/symbols';
+import { symbolName, symbolSpec } from '../data/symbols';
 import { TIMEFRAMES } from '../data/timeframes';
 import {
   deleteSession,
@@ -10,7 +10,7 @@ import {
   type DatasetSource,
   type SavedSession,
 } from '../sessions/sessions';
-import type { TradingState } from '../trading/engine';
+import type { ChallengeRules, TradingState } from '../trading/engine';
 import type { Dataset } from '../types';
 
 export interface SessionConfig {
@@ -19,15 +19,32 @@ export interface SessionConfig {
   dataset: Dataset;
   source: DatasetSource;
   tfSeconds: number;
+  /** An optional second chart that follows the main chart's replay time. */
+  second?: SecondChart;
   startTime: number;
   startBalance: number;
   /** Spread in pips and round-turn commission in USD per lot. */
   spreadPips: number;
   commission: number;
+  /** Prop firm style rules, if this session is a challenge. */
+  challenge?: ChallengeRules;
   /** Set when resuming a saved session. */
   initialPos?: number;
   initialTrading?: TradingState;
 }
+
+export interface SecondChart {
+  dataset: Dataset;
+  source: DatasetSource;
+  tfSeconds: number;
+}
+
+/** Common prop firm challenge shapes (limits as fractions of the starting balance). */
+const CHALLENGES: ChallengeRules[] = [
+  { name: '2-step, phase 1', profitTarget: 0.08, dailyLoss: 0.05, maxLoss: 0.1, minTradingDays: 4 },
+  { name: '2-step, phase 2', profitTarget: 0.05, dailyLoss: 0.05, maxLoss: 0.1, minTradingDays: 4 },
+  { name: '1-step', profitTarget: 0.1, dailyLoss: 0.03, maxLoss: 0.06, minTradingDays: 3 },
+];
 
 const tfLabel = (s: number) => TIMEFRAMES.find((tf) => tf.seconds === s)?.label ?? `${s}s`;
 const fmtMoney = (n: number) => `${n < 0 ? '-' : '+'}$${Math.abs(n).toFixed(2)}`;
@@ -51,6 +68,8 @@ export function Setup({ onStart, onReport }: Props) {
   const [spread, setSpread] = useState('0');
   const [commission, setCommission] = useState('0');
   const [status, setStatus] = useState('');
+  const [second, setSecond] = useState<SecondChart | null>(null);
+  const [challenge, setChallenge] = useState<ChallengeRules | null>(null);
 
   useEffect(() => {
     loadIndex().then(setIndex);
@@ -61,12 +80,14 @@ export function Setup({ onStart, onReport }: Props) {
     setStatus(`Loading ${s.symbol}…`);
     try {
       const d = await loadSource(s.source);
+      const second = s.second && { dataset: await loadSource(s.second.source), source: s.second.source, tfSeconds: s.second.tfSeconds };
       onStart({
         id: s.id,
         createdAt: s.createdAt,
         dataset: d,
         source: s.source,
         tfSeconds: s.tfSeconds,
+        second,
         startTime: s.startTime,
         startBalance: s.startBalance,
         spreadPips: 0,
@@ -88,6 +109,7 @@ export function Setup({ onStart, onReport }: Props) {
   const choose = (d: Dataset, src: DatasetSource) => {
     setDataset(d);
     setSource(src);
+    if (second?.dataset.symbol === d.symbol) setSecond(null);
     setSpread(String(symbolSpec(d.symbol).spreadPips));
     if (!TIMEFRAMES.some((tf) => tf.seconds === tfSeconds && tf.seconds >= d.baseSeconds)) {
       setTfSeconds(TIMEFRAMES.find((tf) => tf.seconds >= d.baseSeconds)?.seconds ?? d.baseSeconds);
@@ -107,6 +129,17 @@ export function Setup({ onStart, onReport }: Props) {
     }
   };
 
+  const pickSecond = async (info: DatasetInfo | null) => {
+    if (!info) return setSecond(null);
+    setStatus(`Loading ${info.symbol}…`);
+    try {
+      setSecond({ dataset: await loadDataset(info), source: { kind: 'download', info }, tfSeconds });
+      setStatus('');
+    } catch (e) {
+      setStatus((e as Error).message);
+    }
+  };
+
   const importFile = async (file: File) => {
     try {
       const symbol = file.name.match(/^[A-Za-z]{6}/)?.[0].toUpperCase() ?? file.name.replace(/\.\w+$/, '');
@@ -117,8 +150,11 @@ export function Setup({ onStart, onReport }: Props) {
     }
   };
 
-  const first = dataset?.bars[0].time;
-  const last = dataset?.bars[dataset.bars.length - 1].time;
+  // With two charts, the start date must fall where both have data.
+  const ranges = [dataset, second?.dataset].filter((d): d is Dataset => !!d).map((d) => d.bars);
+  const first = ranges.length ? Math.max(...ranges.map((b) => b[0].time)) : undefined;
+  const last = ranges.length ? Math.min(...ranges.map((b) => b[b.length - 1].time)) : undefined;
+  const label = (symbol: string) => (symbolName(symbol) ? `${symbol} · ${symbolName(symbol)}` : symbol);
 
   return (
     <div className="setup">
@@ -134,12 +170,23 @@ export function Setup({ onStart, onReport }: Props) {
               return (
                 <div key={s.id} className="session-row">
                   <div className="grow">
-                    <strong>{s.symbol}</strong> {tfLabel(s.tfSeconds)}{' '}
+                    <strong>{s.symbol}</strong> {tfLabel(s.tfSeconds)}
+                    {s.second && (
+                      <>
+                        {' + '}
+                        <strong>{s.second.symbol}</strong> {tfLabel(s.second.tfSeconds)}
+                      </>
+                    )}{' '}
                     <span className="muted small">from {toDateInput(s.startTime)}</span>
                     <div className="muted small">
                       {s.trading.history.length} trades ·{' '}
                       <span className={pnl >= 0 ? 'profit' : 'loss'}>{fmtMoney(pnl)}</span> ·{' '}
                       {s.endedAt ? 'finished' : 'in progress'} · saved {new Date(s.updatedAt).toLocaleString()}
+                      {s.trading.challenge && (
+                        <span className={`badge challenge-${s.trading.challenge.status}`}>
+                          {s.trading.challenge.rules.name}: {s.trading.challenge.status}
+                        </span>
+                      )}
                     </div>
                   </div>
                   {s.endedAt ? (
@@ -163,7 +210,7 @@ export function Setup({ onStart, onReport }: Props) {
       {index?.length === 0 && (
         <p className="muted">
           No market data found. Try the demo data or import a CSV below. (Running locally? Use{' '}
-          <code>npm run fetch-data</code> to download forex majors and gold.)
+          <code>npm run fetch-data</code> to download market data.)
         </p>
       )}
       <div className="chips">
@@ -174,7 +221,7 @@ export function Setup({ onStart, onReport }: Props) {
             onClick={() => pickDownloaded(info)}
             title={`${toDateInput(info.from)} → ${toDateInput(info.to)}`}
           >
-            {info.symbol}
+            {label(info.symbol)}
           </button>
         ))}
         <button className={dataset?.symbol === 'DEMO' ? 'chip active' : 'chip'} onClick={() => choose(demoDataset(), { kind: 'demo' })}>
@@ -206,7 +253,46 @@ export function Setup({ onStart, onReport }: Props) {
             ))}
           </div>
 
-          <h2>3. Start replay from</h2>
+          {index && index.length > 1 && (
+            <>
+              <h2>3. Second chart (optional)</h2>
+              <p className="muted small">
+                Watch another market next to {dataset.symbol}, replaying in sync. You trade on {dataset.symbol}.
+              </p>
+              <div className="chips second-pick">
+                <button className={second ? 'chip' : 'chip active'} onClick={() => pickSecond(null)}>
+                  None
+                </button>
+                {index
+                  .filter((info) => info.symbol !== dataset.symbol)
+                  .map((info) => (
+                    <button
+                      key={info.symbol}
+                      className={second?.dataset.symbol === info.symbol ? 'chip active' : 'chip'}
+                      onClick={() => pickSecond(info)}
+                    >
+                      {label(info.symbol)}
+                    </button>
+                  ))}
+              </div>
+              {second && (
+                <div className="chips second-tf">
+                  {TIMEFRAMES.filter((tf) => tf.seconds >= second.dataset.baseSeconds).map((tf) => (
+                    <button
+                      key={tf.label}
+                      className={tf.seconds === second.tfSeconds ? 'chip active' : 'chip'}
+                      onClick={() => setSecond({ ...second, tfSeconds: tf.seconds })}
+                    >
+                      {tf.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          <h2>{index && index.length > 1 ? 4 : 3}. Start replay from</h2>
+          {first! > last! && <p className="error">These two markets have no dates in common. Pick another second chart.</p>}
           <input
             type="date"
             value={start}
@@ -215,7 +301,7 @@ export function Setup({ onStart, onReport }: Props) {
             onChange={(e) => setStart(e.target.value)}
           />
 
-          <h2>4. Account</h2>
+          <h2>{index && index.length > 1 ? 5 : 4}. Account</h2>
           <div className="row account-setup">
             <label className="field">
               Starting balance (USD)
@@ -231,10 +317,73 @@ export function Setup({ onStart, onReport }: Props) {
             </label>
           </div>
 
+          <h2>{index && index.length > 1 ? 6 : 5}. Challenge (optional)</h2>
+          <p className="muted small">
+            Practise a prop firm style evaluation: hit the profit target without breaking the daily or overall loss
+            limits. Limits use equity (including open trades) and reset at 00:00 UTC.
+          </p>
+          <div className="chips">
+            <button className={challenge ? 'chip' : 'chip active'} onClick={() => setChallenge(null)}>
+              None
+            </button>
+            {CHALLENGES.map((c) => (
+              <button
+                key={c.name}
+                className={challenge?.name === c.name ? 'chip active' : 'chip'}
+                onClick={() => setChallenge(c)}
+              >
+                {c.name}
+              </button>
+            ))}
+            <button
+              className={challenge?.name === 'Custom' ? 'chip active' : 'chip'}
+              onClick={() => setChallenge({ ...(challenge ?? CHALLENGES[0]), name: 'Custom' })}
+            >
+              Custom
+            </button>
+          </div>
+          {challenge && (
+            <div className="row account-setup challenge-rules">
+              {(
+                [
+                  ['Profit target %', 'profitTarget'],
+                  ['Daily loss limit %', 'dailyLoss'],
+                  ['Max loss limit %', 'maxLoss'],
+                ] as const
+              ).map(([label, key]) => (
+                <label key={key} className="field">
+                  {label}
+                  <input
+                    type="number"
+                    min="0.5"
+                    step="0.5"
+                    value={+(challenge[key] * 100).toFixed(2)}
+                    onChange={(e) => setChallenge({ ...challenge, name: 'Custom', [key]: Math.max(0, Number(e.target.value)) / 100 })}
+                  />
+                </label>
+              ))}
+              <label className="field">
+                Min trading days
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={challenge.minTradingDays}
+                  onChange={(e) => setChallenge({ ...challenge, name: 'Custom', minTradingDays: Math.max(0, Math.round(Number(e.target.value))) })}
+                />
+              </label>
+            </div>
+          )}
+
           <div>
             <button
               className="primary"
-              disabled={!start || !(Number(balance) > 0)}
+              disabled={
+                !start ||
+                !(Number(balance) > 0) ||
+                first! > last! ||
+                (!!challenge && !(challenge.profitTarget > 0 && challenge.dailyLoss > 0 && challenge.maxLoss > 0))
+              }
               onClick={() =>
                 onStart({
                   id: crypto.randomUUID(),
@@ -242,10 +391,12 @@ export function Setup({ onStart, onReport }: Props) {
                   dataset,
                   source: source!,
                   tfSeconds,
-                  startTime: fromDateInput(start),
+                  second: second ?? undefined,
+                  startTime: Math.max(fromDateInput(start), first!),
                   startBalance: Number(balance),
                   spreadPips: Math.max(0, Number(spread) || 0),
                   commission: Math.max(0, Number(commission) || 0),
+                  challenge: challenge ?? undefined,
                 })
               }
             >

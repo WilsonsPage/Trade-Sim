@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { aggregate, bucketOf, indexAtTime, partialBar } from '../data/aggregate';
+import { aggregate, bucketOf, indexAtTime, partialBar, type Aggregated } from '../data/aggregate';
 import type { Bar, Dataset } from '../types';
 
 export const SPEEDS = [1, 2, 5, 10, 20];
@@ -13,6 +13,11 @@ export interface ReplayView {
   current: Bar;
   /** Changes whenever the chart must be redrawn from scratch. */
   key: string;
+}
+
+function viewAt(dataset: Dataset, agg: Aggregated, pos: number, key: string): ReplayView {
+  const k = bucketOf(agg, pos);
+  return { bars: agg.bars, revealed: k, current: partialBar(dataset.bars, agg, k, pos), key };
 }
 
 /**
@@ -48,15 +53,10 @@ export function useReplay(dataset: Dataset, tfSeconds: number, startTime: number
     return () => clearInterval(id);
   }, [playing, speed, step, atEnd]);
 
-  const view: ReplayView = useMemo(() => {
-    const k = bucketOf(agg, pos);
-    return {
-      bars: agg.bars,
-      revealed: k,
-      current: partialBar(dataset.bars, agg, k, pos),
-      key: `${dataset.symbol}:${tfSeconds}:${startTime}`,
-    };
-  }, [agg, dataset, pos, tfSeconds, startTime]);
+  const view = useMemo(
+    () => viewAt(dataset, agg, pos, `${dataset.symbol}:${tfSeconds}:${startTime}`),
+    [agg, dataset, pos, tfSeconds, startTime],
+  );
 
   return {
     view,
@@ -70,5 +70,30 @@ export function useReplay(dataset: Dataset, tfSeconds: number, startTime: number
     setSpeed,
     step,
     togglePlay: () => setPlaying((p) => !p && !atEnd),
+    /** Jumps to raw bar `p` and pauses. */
+    seek: (p: number) => {
+      setPlaying(false);
+      setPos(Math.max(0, Math.min(p, dataset.bars.length - 1)));
+    },
   };
+}
+
+/**
+ * Shows `dataset` up to `time`, for a second chart that follows the main replay. Returns
+ * null while `dataset` has no bars at or before `time`.
+ */
+export function useFollowReplay(dataset: Dataset | null, tfSeconds: number, time: number, startTime: number) {
+  const agg = useMemo(() => dataset && aggregate(dataset.bars, tfSeconds), [dataset, tfSeconds]);
+  const pos = useMemo(() => (dataset ? lastIndexAtOrBefore(dataset.bars, time) : -1), [dataset, time]);
+  const view = useMemo(
+    () => (dataset && agg && pos >= 0 ? viewAt(dataset, agg, pos, `${dataset.symbol}:${tfSeconds}:${startTime}`) : null),
+    [dataset, agg, pos, tfSeconds, startTime],
+  );
+  return { view, price: dataset && pos >= 0 ? dataset.bars[pos].close : null };
+}
+
+/** Index of the last bar that opened at or before `time`, or -1 if there is none. */
+export function lastIndexAtOrBefore(bars: Bar[], time: number): number {
+  const i = indexAtTime(bars, time + 1);
+  return bars[i].time <= time ? i : i - 1;
 }

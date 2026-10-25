@@ -1,7 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { LineSeries, type ISeriesApi, type LineData, type UTCTimestamp, type WhitespaceData } from 'lightweight-charts';
 import type { IndicatorDef } from '../indicators/presets';
-import { runScript, type Plot } from '../indicators/runScript';
+import type { Plot } from '../indicators/runScript';
+import { ScriptRunner } from '../indicators/runner';
+import type { ScriptResult } from '../indicators/worker';
+import type { Bar } from '../types';
 import type { ReplayView } from '../replay/useReplay';
 import type { ChartApi } from './ReplayChart';
 
@@ -17,7 +20,16 @@ interface Props {
 
 type Point = LineData | WhitespaceData;
 
-/** Runs the enabled indicator scripts on the revealed bars and draws their plots. */
+interface Job {
+  view: ReplayView;
+  visible: Bar[];
+  defs: IndicatorDef[];
+}
+
+/**
+ * Runs the enabled indicator scripts on the revealed bars (in a sandboxed worker) and
+ * draws their plots.
+ */
 export function IndicatorLayer({ api, view, defs, onErrors }: Props) {
   const state = useRef<{ structure: string; revealed: number; series: ISeriesApi<'Line'>[] }>({
     structure: '',
@@ -26,18 +38,14 @@ export function IndicatorLayer({ api, view, defs, onErrors }: Props) {
   });
   const lastErrors = useRef('{}');
 
-  useEffect(() => {
-    const { bars, revealed, current, key } = view;
-    const visible = [...bars.slice(Math.max(0, revealed - WINDOW), revealed), current];
-
-    const errors: Record<string, string> = {};
+  /** Draws one finished job. Kept in a ref so the runner always calls the latest version. */
+  const apply = useRef((_r: ScriptResult, _j: Job) => {});
+  apply.current = ({ results: raw, errors }: ScriptResult, { view, visible, defs }: Job) => {
+    const { revealed, key } = view;
     const results: { def: IndicatorDef; plots: Plot[] }[] = [];
-    for (const def of defs.filter((d) => d.enabled)) {
-      try {
-        results.push({ def, plots: runScript(def.code, visible) });
-      } catch (e) {
-        errors[def.id] = (e as Error).message;
-      }
+    for (const r of raw) {
+      const def = defs.find((d) => d.id === r.id);
+      if (def) results.push({ def, plots: r.plots });
     }
     const errJson = JSON.stringify(errors);
     if (errJson !== lastErrors.current) {
@@ -97,7 +105,28 @@ export function IndicatorLayer({ api, view, defs, onErrors }: Props) {
       }
     });
     s.revealed = revealed;
-  }, [api, view, defs, onErrors]);
+  };
+
+  const runner = useRef<ScriptRunner<Job> | null>(null);
+  useEffect(() => {
+    const r = new ScriptRunner<Job>((result, job) => apply.current(result, job));
+    runner.current = r;
+    return () => {
+      r.dispose();
+      runner.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const { bars, revealed, current } = view;
+    const visible = [...bars.slice(Math.max(0, revealed - WINDOW), revealed), current];
+    const enabled = defs.filter((d) => d.enabled);
+    runner.current?.run(
+      enabled.map(({ id, code }) => ({ id, code })),
+      visible,
+      { view, visible, defs: enabled },
+    );
+  }, [api, view, defs]);
 
   useEffect(
     () => () => {

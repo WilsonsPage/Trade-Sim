@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import type { SymbolSpec } from '../data/symbols';
-import { pnlUsd, type PendingType, type Position, type Side } from '../trading/engine';
+import { pnlUsd, tradingDays, type ClosedTrade, type PendingType, type Position, type Side } from '../trading/engine';
 import type { Trading } from '../trading/useTrading';
 import { levelError, pendingPriceError } from '../trading/validate';
+import { JournalEditor } from './Journal';
 
 type OrderKind = 'market' | `${Side}-${PendingType}`;
 
@@ -18,7 +19,12 @@ const money = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n).toLocaleString(u
 const num = (s: string) => (s.trim() === '' ? null : Number(s));
 const fmtTime = (t: number) => new Date(t * 1000).toISOString().slice(5, 16).replace('T', ' ');
 
-function PositionRow({ p, trading, spec }: { p: Position; trading: Trading; spec: SymbolSpec }) {
+interface JournalProps {
+  knownTags: string[];
+  capture: () => Promise<string | null>;
+}
+
+function PositionRow({ p, trading, spec, journal }: { p: Position; trading: Trading; spec: SymbolSpec; journal: JournalProps }) {
   const [open, setOpen] = useState(false);
   const [sl, setSl] = useState(p.sl?.toString() ?? '');
   const [tp, setTp] = useState(p.tp?.toString() ?? '');
@@ -48,6 +54,7 @@ function PositionRow({ p, trading, spec }: { p: Position; trading: Trading; spec
         <div className="grow">
           <div>
             <strong>{spec.symbol}</strong>, <span className={p.side}>{p.side} {p.lots.toFixed(2)}</span>
+            {p.atBreakeven && <span className="badge">BE</span>}
           </div>
           <div className="muted small">
             {p.entryPrice.toFixed(spec.digits)} → {mark.toFixed(spec.digits)}
@@ -75,13 +82,88 @@ function PositionRow({ p, trading, spec }: { p: Position; trading: Trading; spec
               Close {money(pnl)}
             </button>
           </div>
+          <JournalEditor trade={p} {...journal} onChange={(f) => trading.annotate(p.id, f)} />
         </div>
       )}
     </div>
   );
 }
 
-export function TradePanel({ trading, spec }: { trading: Trading; spec: SymbolSpec }) {
+function ChallengeCard({ trading }: { trading: Trading }) {
+  const { state, equity } = trading;
+  const c = state.challenge!;
+  const { rules } = c;
+  const start = state.startBalance;
+  const target = start * rules.profitTarget;
+  const dailyLeft = equity - (c.dayStartBalance - rules.dailyLoss * start);
+  const maxLeft = equity - start * (1 - rules.maxLoss);
+  const days = tradingDays(state);
+  const meter = (label: string, value: string, fraction: number, tone: 'good' | 'bad') => (
+    <div className="meter">
+      <div className="row small">
+        <span className="grow muted">{label}</span>
+        <span>{value}</span>
+      </div>
+      <div className="meter-track">
+        <div className={`meter-fill ${tone}`} style={{ width: `${Math.max(0, Math.min(1, fraction)) * 100}%` }} />
+      </div>
+    </div>
+  );
+  return (
+    <div className={`challenge challenge-${c.status}`}>
+      <div className="row">
+        <strong className="grow">{rules.name} challenge</strong>
+        <span className={`badge challenge-${c.status}`}>{c.status}</span>
+      </div>
+      {c.reason && <div className="error small">{c.reason}</div>}
+      {meter('Profit target', `${money(state.balance - start)} / ${money(target)}`, (state.balance - start) / target, 'good')}
+      {meter('Daily loss left', money(Math.max(0, dailyLeft)), dailyLeft / (rules.dailyLoss * start), 'bad')}
+      {meter('Max loss left', money(Math.max(0, maxLeft)), maxLeft / (rules.maxLoss * start), 'bad')}
+      {rules.minTradingDays > 0 && (
+        <div className="row small">
+          <span className="grow muted">Trading days</span>
+          <span>
+            {days} / {rules.minTradingDays}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HistoryRow({ t, trading, spec, journal }: { t: ClosedTrade; trading: Trading; spec: SymbolSpec; journal: JournalProps }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="trade-row">
+      <div className="row" onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }}>
+        <div className="grow">
+          <div>
+            <span className={t.side}>
+              {t.side} {t.lots.toFixed(2)}
+            </span>{' '}
+            <span className="muted small">{t.reason === 'manual' ? '' : t.reason.toUpperCase()}</span>
+            {(t.note || t.tags?.length || t.hasShot) && <span className="muted small"> · 📝</span>}
+          </div>
+          <div className="muted small">
+            {t.entryPrice.toFixed(spec.digits)} → {t.exitPrice.toFixed(spec.digits)} · {fmtTime(t.exitTime)}
+          </div>
+        </div>
+        <strong className={t.pnl >= 0 ? 'profit' : 'loss'}>{money(t.pnl)}</strong>
+      </div>
+      {open && <JournalEditor trade={t} {...journal} onChange={(f) => trading.annotate(t.id, f)} />}
+    </div>
+  );
+}
+
+export function TradePanel({
+  trading,
+  spec,
+  capture,
+}: {
+  trading: Trading;
+  spec: SymbolSpec;
+  capture: () => Promise<string | null>;
+}) {
   const [tab, setTab] = useState<'trade' | 'history'>('trade');
   const [kind, setKind] = useState<OrderKind>('market');
   const [lots, setLots] = useState('0.10');
@@ -113,7 +195,14 @@ export function TradePanel({ trading, spec }: { trading: Trading; spec: SymbolSp
   const reward =
     tpN !== null && lotsN > 0 ? Math.abs(pnlUsd(spec, riskSide, lotsN, entry, tpN)) - commissionPerLot * lotsN : null;
 
+  const failed = state.challenge?.status === 'failed';
+  const journal: JournalProps = {
+    capture,
+    knownTags: [...new Set([...state.history, ...state.positions].flatMap((t) => t.tags ?? []))].sort(),
+  };
+
   const submit = (side: Side) => {
+    if (failed) return setError('The challenge has failed, so trading is closed. End the session to see your report.');
     if (sizing === 'risk' && slN === null) return setError('Set a stop loss to size by risk');
     if (!(lotsN >= 0.01)) return setError('Volume must be at least 0.01 lots');
     if (kind === 'market') {
@@ -151,6 +240,8 @@ export function TradePanel({ trading, spec }: { trading: Trading; spec: SymbolSp
           <strong className={trading.floating >= 0 ? 'profit' : 'loss'}>{money(trading.floating)}</strong>
         </div>
       </div>
+
+      {state.challenge && <ChallengeCard trading={trading} />}
 
       <div className="tabs">
         <button className={tab === 'trade' ? 'active' : ''} onClick={() => setTab('trade')}>
@@ -237,6 +328,21 @@ export function TradePanel({ trading, spec }: { trading: Trading; spec: SymbolSp
             )}
           </div>
 
+          <label className="field row be-setting">
+            <span className="grow">Auto breakeven (moves SL to entry)</span>
+            <select
+              value={state.autoBreakevenR ?? ''}
+              onChange={(e) => trading.setAutoBreakeven(e.target.value ? Number(e.target.value) : null)}
+            >
+              <option value="">Off</option>
+              {[0.5, 1, 1.5, 2, 3].map((r) => (
+                <option key={r} value={r}>
+                  at +{r}R
+                </option>
+              ))}
+            </select>
+          </label>
+
           <h4>
             Positions ({state.positions.length})
             {state.positions.length > 1 && (
@@ -247,7 +353,7 @@ export function TradePanel({ trading, spec }: { trading: Trading; spec: SymbolSp
           </h4>
           {state.positions.length === 0 && <p className="muted small">No open positions.</p>}
           {state.positions.map((p) => (
-            <PositionRow key={p.id} p={p} trading={trading} spec={spec} />
+            <PositionRow key={p.id} p={p} trading={trading} spec={spec} journal={journal} />
           ))}
 
           <h4>Orders ({state.orders.length})</h4>
@@ -275,20 +381,7 @@ export function TradePanel({ trading, spec }: { trading: Trading; spec: SymbolSp
         <>
           {state.history.length === 0 && <p className="muted small">No closed trades yet.</p>}
           {[...state.history].reverse().map((t) => (
-            <div key={t.id} className="trade-row row">
-              <div className="grow">
-                <div>
-                  <span className={t.side}>
-                    {t.side} {t.lots.toFixed(2)}
-                  </span>{' '}
-                  <span className="muted small">{t.reason === 'manual' ? '' : t.reason.toUpperCase()}</span>
-                </div>
-                <div className="muted small">
-                  {t.entryPrice.toFixed(spec.digits)} → {t.exitPrice.toFixed(spec.digits)} · {fmtTime(t.exitTime)}
-                </div>
-              </div>
-              <strong className={t.pnl >= 0 ? 'profit' : 'loss'}>{money(t.pnl)}</strong>
-            </div>
+            <HistoryRow key={t.id} t={t} trading={trading} spec={spec} journal={journal} />
           ))}
         </>
       )}

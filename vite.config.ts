@@ -1,12 +1,37 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
+
+// The site has no server to send security headers, so the production page carries its
+// Content Security Policy in a <meta> tag: only the site's own scripts, styles, workers and
+// data can load, and nothing can be sent to other sites. (Dev mode needs inline scripts.)
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "connect-src 'self'",
+  "worker-src 'self'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+].join('; ');
+
+const securityMeta = (): Plugin => ({
+  name: 'security-meta',
+  apply: 'build',
+  transformIndexHtml: () => [
+    { tag: 'meta', attrs: { 'http-equiv': 'Content-Security-Policy', content: CSP }, injectTo: 'head-prepend' },
+    { tag: 'meta', attrs: { name: 'referrer', content: 'no-referrer' }, injectTo: 'head-prepend' },
+  ],
+});
 
 export default defineConfig({
   // GitHub Pages serves the app from /<repo>/; the deploy workflow sets BASE_PATH.
   base: process.env.BASE_PATH ?? '/',
   plugins: [
     react(),
+    securityMeta(),
     VitePWA({
       registerType: 'autoUpdate',
       manifest: {
