@@ -49,6 +49,8 @@ export function ReplayChart({ view, digits, children }: Props) {
     });
     chartRef.current = chart;
     setApi({ chart, series: seriesRef.current });
+    // Lets browser tests map prices to pixels; stripped from production builds.
+    if (import.meta.env.DEV) Object.assign(window, { __chart: { chart, series: seriesRef.current } });
     return () => {
       setApi(null);
       // Layers clean up their series and lines in their own effects, which can run after

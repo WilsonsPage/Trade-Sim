@@ -50,10 +50,7 @@ code { background: var(--panel); padding: 1px 5px; border-radius: 3px; }
 .panel { width: 320px; border-left: 1px solid var(--border); padding: 12px; overflow-y: auto; }
 .panel h3 { margin: 0 0 8px; font-size: 14px; }
 
-@media (max-width: 760px) {
-  .body { flex-direction: column; }
-  .panel { width: auto; border-left: 0; border-top: 1px solid var(--border); max-height: 40%; }
-}
+
 
 .chart { position: relative; }
 .chart-canvas { position: absolute; inset: 0; }
@@ -130,3 +127,23 @@ button.link { background: none; border: none; color: var(--accent); padding: 0; 
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 th { color: var(--muted); font-weight: 500; }
+.account-setup { flex-wrap: wrap; }
+.account-setup .field { flex: 1; min-width: 150px; }
+.inline-select { padding: 0; border: none; background: none; color: var(--muted); font-size: 12px; }
+
+/* Phones: chart on top, toolbar as a scrollable row, trade panel below. Keep last so it wins. */
+@media (max-width: 760px) {
+  .replay { height: auto; min-height: 100%; }
+  .toolbar { gap: 6px; padding: 6px; }
+  .toolbar button, .toolbar select { padding: 5px 8px; }
+  .toolbar .divider, .toolbar .clock { display: none; }
+  .body { flex-direction: column; }
+  .draw-toolbar {
+    width: auto; height: 44px; flex-direction: row; padding: 0 6px;
+    border-right: 0; border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden;
+  }
+  .draw-toolbar button { flex: none; }
+  .draw-toolbar .sep { width: 1px; height: 24px; margin: 0 4px; }
+  .chart { flex: none; height: 55vh; }
+  .panel { width: auto; border-left: 0; border-top: 1px solid var(--border); }
+}

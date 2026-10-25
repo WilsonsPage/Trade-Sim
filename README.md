@@ -69,9 +69,11 @@ The right-hand panel works like the MT5 mobile app:
 - **Pending orders**: Buy Limit, Sell Limit, Buy Stop and Sell Stop at a price you choose, with optional SL/TP.
 - **Positions**: live P/L. Tap a position to modify SL/TP or close it.
 - **History**: closed trades with exit reason (SL, TP or manual).
-- Entries, SL/TP and pending orders appear as lines on the chart, and fills as markers.
+- Entries, SL/TP and pending orders appear as lines on the chart, and fills as markers. **Drag** an SL, TP or pending-order line to move it (invalid levels snap back).
+- **Risk sizing**: switch *Volume (lots)* to *Risk (% of balance)* and the lot size is worked out from your stop loss.
+- **Costs**: set spread (pips) and commission ($ per lot, round turn) when starting a session. Buys open at the ask and close at the bid; sells the other way round.
 
-Orders fill on M1 data inside each chart bar. If SL and TP are both touched in the same minute, the stop loss is assumed to hit first, and a gap through a level fills at the open. P/L is in USD (USD-based pairs such as USDJPY are converted at the exit price). Spread and commission are not modelled yet.
+Orders fill on M1 data inside each chart bar. If SL and TP are both touched in the same minute, the stop loss is assumed to hit first, and a gap through a level fills at the open. P/L is in USD (USD-based pairs such as USDJPY are converted at the exit price) and includes commission. Swap and margin are not modelled.
 
 ## Sessions and stats
 
@@ -82,4 +84,4 @@ Every session autosaves in your browser (IndexedDB) as you replay and trade. Use
 1. ✅ Data and replay chart
 2. ✅ Drawing tools, indicators and trading engine
 3. ✅ Saved sessions and end-of-session stats
-4. Polish and mobile (installable PWA)
+4. ✅ Polish and mobile: phone layout, draggable levels, spread/commission, risk sizing, compact data

@@ -21,10 +21,41 @@ export async function loadIndex(): Promise<DatasetInfo[]> {
   }
 }
 
+interface EncodedBars {
+  format: 2;
+  symbol: string;
+  baseSeconds: number;
+  digits: number;
+  t0: number;
+  t: number[];
+  o: number[];
+  h: number[];
+  l: number[];
+  c: number[];
+}
+
+/** Decodes the compact format written by scripts/codec.mjs. */
+export function decodeBars(e: EncodedBars): Dataset {
+  const k = 10 ** e.digits;
+  const bars: Bar[] = new Array(e.t.length);
+  let time = e.t0;
+  let prevC = 0;
+  for (let i = 0; i < e.t.length; i++) {
+    time += e.t[i] * e.baseSeconds;
+    const O = prevC + e.o[i];
+    const C = O + e.c[i];
+    bars[i] = { time, open: O / k, high: (Math.max(O, C) + e.h[i]) / k, low: (Math.min(O, C) - e.l[i]) / k, close: C / k };
+    prevC = C;
+  }
+  return { symbol: e.symbol, baseSeconds: e.baseSeconds, bars };
+}
+
 export async function loadDataset(info: DatasetInfo): Promise<Dataset> {
   const res = await fetch(`${import.meta.env.BASE_URL}data/${info.file}`);
   if (!res.ok) throw new Error(`Could not load ${info.file} (${res.status})`);
-  const json = (await res.json()) as { symbol: string; baseSeconds: number; bars: RawBar[] };
+  const json = (await res.json()) as EncodedBars | { symbol: string; baseSeconds: number; bars: RawBar[] };
+  if ('format' in json) return decodeBars(json);
+  // Files from before the compact format.
   return {
     symbol: json.symbol,
     baseSeconds: json.baseSeconds,

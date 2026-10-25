@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { demoDataset, loadDataset, loadIndex, parseCsv, type DatasetInfo } from '../data/load';
+import { symbolSpec } from '../data/symbols';
 import { TIMEFRAMES } from '../data/timeframes';
 import {
   deleteSession,
@@ -20,6 +21,9 @@ export interface SessionConfig {
   tfSeconds: number;
   startTime: number;
   startBalance: number;
+  /** Spread in pips and round-turn commission in USD per lot. */
+  spreadPips: number;
+  commission: number;
   /** Set when resuming a saved session. */
   initialPos?: number;
   initialTrading?: TradingState;
@@ -44,6 +48,8 @@ export function Setup({ onStart, onReport }: Props) {
   const [tfSeconds, setTfSeconds] = useState(900);
   const [start, setStart] = useState('');
   const [balance, setBalance] = useState('10000');
+  const [spread, setSpread] = useState('0');
+  const [commission, setCommission] = useState('0');
   const [status, setStatus] = useState('');
 
   useEffect(() => {
@@ -63,6 +69,8 @@ export function Setup({ onStart, onReport }: Props) {
         tfSeconds: s.tfSeconds,
         startTime: s.startTime,
         startBalance: s.startBalance,
+        spreadPips: 0,
+        commission: 0,
         initialPos: s.pos,
         initialTrading: s.trading,
       });
@@ -80,6 +88,7 @@ export function Setup({ onStart, onReport }: Props) {
   const choose = (d: Dataset, src: DatasetSource) => {
     setDataset(d);
     setSource(src);
+    setSpread(String(symbolSpec(d.symbol).spreadPips));
     if (!TIMEFRAMES.some((tf) => tf.seconds === tfSeconds && tf.seconds >= d.baseSeconds)) {
       setTfSeconds(TIMEFRAMES.find((tf) => tf.seconds >= d.baseSeconds)?.seconds ?? d.baseSeconds);
     }
@@ -206,8 +215,21 @@ export function Setup({ onStart, onReport }: Props) {
             onChange={(e) => setStart(e.target.value)}
           />
 
-          <h2>4. Starting balance (USD)</h2>
-          <input type="number" min="100" step="100" value={balance} onChange={(e) => setBalance(e.target.value)} />
+          <h2>4. Account</h2>
+          <div className="row account-setup">
+            <label className="field">
+              Starting balance (USD)
+              <input type="number" min="100" step="100" value={balance} onChange={(e) => setBalance(e.target.value)} />
+            </label>
+            <label className="field">
+              Spread (pips)
+              <input type="number" min="0" step="0.1" value={spread} onChange={(e) => setSpread(e.target.value)} />
+            </label>
+            <label className="field">
+              Commission ($ per lot, round turn)
+              <input type="number" min="0" step="0.5" value={commission} onChange={(e) => setCommission(e.target.value)} />
+            </label>
+          </div>
 
           <div>
             <button
@@ -222,6 +244,8 @@ export function Setup({ onStart, onReport }: Props) {
                   tfSeconds,
                   startTime: fromDateInput(start),
                   startBalance: Number(balance),
+                  spreadPips: Math.max(0, Number(spread) || 0),
+                  commission: Math.max(0, Number(commission) || 0),
                 })
               }
             >

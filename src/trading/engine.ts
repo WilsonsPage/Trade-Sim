@@ -36,6 +36,10 @@ export interface ClosedTrade extends Position {
 
 export interface TradingState {
   startBalance: number;
+  /** Price data is bid; buys open and sells close this much higher (the ask). */
+  spread: number;
+  /** Round-turn commission in USD per 1.00 lot, charged when a trade closes. */
+  commission: number;
   balance: number;
   positions: Position[];
   orders: PendingOrder[];
@@ -44,9 +48,11 @@ export interface TradingState {
   equityCurve: { time: number; equity: number }[];
 }
 
-export function initialState(startBalance: number, time: number): TradingState {
+export function initialState(startBalance: number, time: number, spread = 0, commission = 0): TradingState {
   return {
     startBalance,
+    spread,
+    commission,
     balance: startBalance,
     positions: [],
     orders: [],
@@ -66,8 +72,19 @@ export function pnlUsd(spec: SymbolSpec, side: Side, lots: number, entry: number
   return spec.symbol.startsWith('USD') ? quote / exit : quote;
 }
 
-export function floatingPnl(state: TradingState, spec: SymbolSpec, price: number): number {
-  return state.positions.reduce((sum, p) => sum + pnlUsd(spec, p.side, p.lots, p.entryPrice, price), 0);
+/** Price a trade on `side` is opened at, given the bid. */
+export const entryPrice = (state: TradingState, side: Side, bid: number) => (side === 'buy' ? bid + (state.spread ?? 0) : bid);
+
+/** Price a trade on `side` is closed at, given the bid. */
+export const exitPrice = (state: TradingState, side: Side, bid: number) => (side === 'buy' ? bid : bid + (state.spread ?? 0));
+
+/** P/L of an open position if it were closed now, after commission. */
+export function positionPnl(state: TradingState, spec: SymbolSpec, p: Position, bid: number): number {
+  return pnlUsd(spec, p.side, p.lots, p.entryPrice, exitPrice(state, p.side, bid)) - (state.commission ?? 0) * p.lots;
+}
+
+export function floatingPnl(state: TradingState, spec: SymbolSpec, bid: number): number {
+  return state.positions.reduce((sum, p) => sum + positionPnl(state, spec, p, bid), 0);
 }
 
 export function openPosition(
@@ -90,7 +107,7 @@ export function closePosition(
 ): TradingState {
   const p = state.positions.find((x) => x.id === id);
   if (!p) return state;
-  const pnl = pnlUsd(spec, p.side, p.lots, p.entryPrice, price);
+  const pnl = pnlUsd(spec, p.side, p.lots, p.entryPrice, price) - (state.commission ?? 0) * p.lots;
   const balance = state.balance + pnl;
   return {
     ...state,
@@ -107,6 +124,14 @@ export function placeOrder(state: TradingState, order: Omit<PendingOrder, 'id'>)
 
 export function cancelOrder(state: TradingState, id: string): TradingState {
   return { ...state, orders: state.orders.filter((o) => o.id !== id) };
+}
+
+export function modifyOrder(
+  state: TradingState,
+  id: string,
+  fields: Partial<Pick<PendingOrder, 'price' | 'sl' | 'tp'>>,
+): TradingState {
+  return { ...state, orders: state.orders.map((o) => (o.id === id ? { ...o, ...fields } : o)) };
 }
 
 export function modifyPosition(state: TradingState, id: string, sl: number | null, tp: number | null): TradingState {
@@ -140,24 +165,29 @@ function exitFill(p: Position, bar: Bar): { price: number; reason: CloseReason }
   return null;
 }
 
-/** Advances the account through one raw (M1) bar: fills pending orders, then checks SL/TP. */
+/**
+ * Advances the account through one raw (M1) bar: fills pending orders, then checks SL/TP.
+ * Buys trigger on the ask and sells on the bid when opening, and the other way round when closing.
+ */
 export function processBar(state: TradingState, spec: SymbolSpec, bar: Bar): TradingState {
+  const spread = state.spread ?? 0;
+  const ask: Bar = { ...bar, open: bar.open + spread, high: bar.high + spread, low: bar.low + spread, close: bar.close + spread };
   let s = state;
   for (const o of state.orders) {
-    const fill = pendingFill(o, bar);
+    const fill = pendingFill(o, o.side === 'buy' ? ask : bar);
     if (fill === null) continue;
     s = cancelOrder(s, o.id);
     s = openPosition(s, { side: o.side, lots: o.lots, sl: o.sl, tp: o.tp }, fill, bar.time);
   }
   for (const p of s.positions) {
-    const exit = exitFill(p, bar);
+    const exit = exitFill(p, p.side === 'buy' ? bar : ask);
     if (exit) s = closePosition(s, spec, p.id, exit.price, bar.time, exit.reason);
   }
   return s;
 }
 
 /** Closes all positions at `price` and drops pending orders. */
-export function endSession(state: TradingState, spec: SymbolSpec, price: number, time: number): TradingState {
-  const closed = state.positions.reduce((s, p) => closePosition(s, spec, p.id, price, time, 'end'), state);
+export function endSession(state: TradingState, spec: SymbolSpec, bid: number, time: number): TradingState {
+  const closed = state.positions.reduce((s, p) => closePosition(s, spec, p.id, exitPrice(s, p.side, bid), time, 'end'), state);
   return { ...closed, orders: [] };
 }

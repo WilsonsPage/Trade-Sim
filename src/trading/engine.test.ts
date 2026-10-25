@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { symbolSpec } from '../data/symbols';
-import { closePosition, initialState, openPosition, placeOrder, pnlUsd, processBar } from './engine';
+import { closePosition, endSession, entryPrice, initialState, openPosition, placeOrder, pnlUsd, processBar } from './engine';
 
 const eurusd = symbolSpec('EURUSD');
 const bar = (open: number, high: number, low: number, close: number, time = 60) => ({ time, open, high, low, close });
@@ -56,5 +56,33 @@ describe('processBar', () => {
     let s = openPosition(start, { side: 'buy', lots: 0.1, sl: null, tp: null }, 1.1, 0);
     s = closePosition(s, eurusd, s.positions[0].id, 1.105, 120, 'manual');
     expect(s.history[0].pnl).toBeCloseTo(50);
+  });
+});
+
+describe('spread and commission', () => {
+  // 1 pip spread, $7 per lot round turn.
+  const start = initialState(10_000, 0, 0.0001, 7);
+
+  it('opens buys at the ask and charges commission on close', () => {
+    let s = openPosition(start, { side: 'buy', lots: 1, sl: null, tp: null }, entryPrice(start, 'buy', 1.1), 0);
+    expect(s.positions[0].entryPrice).toBeCloseTo(1.1001);
+    s = endSession(s, eurusd, 1.1001, 60);
+    expect(s.history[0].pnl).toBeCloseTo(-7);
+  });
+
+  it('triggers a sell stop loss on the ask, not the bid', () => {
+    let s = openPosition(start, { side: 'sell', lots: 1, sl: 1.1005, tp: null }, 1.1, 0);
+    s = processBar(s, eurusd, bar(1.1, 1.10045, 1.0999, 1.1));
+    expect(s.history).toHaveLength(1);
+    expect(s.history[0]).toMatchObject({ reason: 'sl', exitPrice: 1.1005 });
+    expect(s.history[0].pnl).toBeCloseTo(-57);
+  });
+
+  it('fills a buy limit when the ask reaches it', () => {
+    let s = placeOrder(start, { side: 'buy', type: 'limit', price: 1.1, lots: 1, sl: null, tp: null, placedAt: 0 });
+    s = processBar(s, eurusd, bar(1.1003, 1.1004, 1.09995, 1.1002));
+    expect(s.orders).toHaveLength(1);
+    s = processBar(s, eurusd, bar(1.1002, 1.1003, 1.0998, 1.1));
+    expect(s.positions[0].entryPrice).toBe(1.1);
   });
 });

@@ -6,12 +6,13 @@ import type { IndicatorDef } from '../indicators/presets';
 import { SPEEDS, useReplay } from '../replay/useReplay';
 import { saveSession, type SavedSession } from '../sessions/sessions';
 import { useTrading } from '../trading/useTrading';
+import { levelError, pendingPriceError } from '../trading/validate';
 import { COLORS, DrawingToolbar } from './DrawingToolbar';
 import { DrawingLayer } from './DrawingLayer';
 import { IndicatorLayer } from './IndicatorLayer';
 import { IndicatorsDialog } from './IndicatorsDialog';
 import { ReplayChart } from './ReplayChart';
-import { TradeLines } from './TradeLines';
+import { TradeLines, type DragTarget } from './TradeLines';
 import { TradePanel } from './TradePanel';
 import type { SessionConfig } from './Setup';
 
@@ -38,7 +39,13 @@ export function Replay({ config, onExit, onEnd }: Props) {
   const [tfSeconds, setTfSeconds] = useState(config.tfSeconds);
   const replay = useReplay(dataset, tfSeconds, startTime, config.initialPos);
   const spec = useMemo(() => symbolSpec(dataset.symbol), [dataset.symbol]);
-  const trading = useTrading(dataset, spec, replay.pos, config.startBalance, config.initialTrading);
+  const trading = useTrading(
+    dataset,
+    spec,
+    replay.pos,
+    { startBalance: config.startBalance, spread: config.spreadPips * spec.pip, commission: config.commission },
+    config.initialTrading,
+  );
 
   const snapshot = (trades = trading.state, endedAt: number | null = null): SavedSession => ({
     id: config.id,
@@ -113,6 +120,28 @@ export function Replay({ config, onExit, onEnd }: Props) {
     if (selectedId) changeDrawings(drawings.map((d) => (d.id === selectedId ? { ...d, color: c } : d)));
   };
 
+  /** Applies a dragged SL/TP/order line if the new level is valid. */
+  const onDragLine = (target: DragTarget, raw: number) => {
+    const price = Number(raw.toFixed(spec.digits));
+    const { positions, orders } = trading.state;
+    if (target.kind === 'position') {
+      const p = positions.find((x) => x.id === target.id);
+      if (!p) return false;
+      const sl = target.field === 'sl' ? price : p.sl;
+      const tp = target.field === 'tp' ? price : p.tp;
+      if (levelError(p.side, p.side === 'buy' ? trading.price : trading.ask, sl, tp)) return false;
+      trading.modify(p.id, sl, tp);
+      return true;
+    }
+    const o = orders.find((x) => x.id === target.id);
+    if (!o) return false;
+    const next = { price: o.price, sl: o.sl, tp: o.tp, [target.field]: price };
+    if (target.field === 'price' && pendingPriceError(o.side, o.type, price, trading.price, trading.ask)) return false;
+    if (levelError(o.side, next.price, next.sl, next.tp)) return false;
+    trading.modifyOrder(o.id, next);
+    return true;
+  };
+
   const onIndicatorErrors = useCallback((e: Record<string, string>) => setIndicatorErrors(e), []);
 
   useEffect(() => {
@@ -164,7 +193,7 @@ export function Replay({ config, onExit, onEnd }: Props) {
         </select>
         <span className="spacer" />
         {saveError && <span className="error small">Not saved</span>}
-        <span className="muted">{fmtTime(replay.time)} UTC</span>
+        <span className="muted clock">{fmtTime(replay.time)} UTC</span>
         <strong>{replay.price.toFixed(spec.digits)}</strong>
         <button className="end-btn" onClick={endSession}>
           End session
@@ -190,7 +219,7 @@ export function Replay({ config, onExit, onEnd }: Props) {
           {(api) => (
             <>
               <IndicatorLayer api={api} view={replay.view} defs={indicators} onErrors={onIndicatorErrors} />
-              <TradeLines api={api} state={trading.state} tfSeconds={tfSeconds} now={replay.time} />
+              <TradeLines api={api} state={trading.state} tfSeconds={tfSeconds} now={replay.time} onDrag={onDragLine} />
               <DrawingLayer
                 api={api}
                 bars={replay.view.bars}

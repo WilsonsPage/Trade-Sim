@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { SymbolSpec } from '../data/symbols';
 import { pnlUsd, type PendingType, type Position, type Side } from '../trading/engine';
 import type { Trading } from '../trading/useTrading';
+import { levelError, pendingPriceError } from '../trading/validate';
 
 type OrderKind = 'market' | `${Side}-${PendingType}`;
 
@@ -17,23 +18,23 @@ const money = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n).toLocaleString(u
 const num = (s: string) => (s.trim() === '' ? null : Number(s));
 const fmtTime = (t: number) => new Date(t * 1000).toISOString().slice(5, 16).replace('T', ' ');
 
-/** Checks SL/TP sit on the right side of the entry for the trade direction. */
-function levelError(side: Side, entry: number, sl: number | null, tp: number | null): string | null {
-  const d = side === 'buy' ? 1 : -1;
-  if (sl !== null && (Number.isNaN(sl) || (entry - sl) * d <= 0)) return `Stop loss must be ${side === 'buy' ? 'below' : 'above'} the entry`;
-  if (tp !== null && (Number.isNaN(tp) || (tp - entry) * d <= 0)) return `Take profit must be ${side === 'buy' ? 'above' : 'below'} the entry`;
-  return null;
-}
-
 function PositionRow({ p, trading, spec }: { p: Position; trading: Trading; spec: SymbolSpec }) {
   const [open, setOpen] = useState(false);
   const [sl, setSl] = useState(p.sl?.toString() ?? '');
   const [tp, setTp] = useState(p.tp?.toString() ?? '');
   const [error, setError] = useState<string | null>(null);
-  const pnl = pnlUsd(spec, p.side, p.lots, p.entryPrice, trading.price);
+  const pnl = trading.positionPnl(p);
+
+  // Keep the inputs in step when levels are dragged on the chart.
+  useEffect(() => {
+    setSl(p.sl?.toString() ?? '');
+    setTp(p.tp?.toString() ?? '');
+  }, [p.sl, p.tp]);
+  // The price this position would close at now: bid for buys, ask for sells.
+  const mark = p.side === 'buy' ? trading.price : trading.ask;
 
   const save = () => {
-    const err = levelError(p.side, trading.price, num(sl), num(tp));
+    const err = levelError(p.side, mark, num(sl), num(tp));
     setError(err);
     if (!err) {
       trading.modify(p.id, num(sl), num(tp));
@@ -49,7 +50,7 @@ function PositionRow({ p, trading, spec }: { p: Position; trading: Trading; spec
             <strong>{spec.symbol}</strong>, <span className={p.side}>{p.side} {p.lots.toFixed(2)}</span>
           </div>
           <div className="muted small">
-            {p.entryPrice.toFixed(spec.digits)} → {trading.price.toFixed(spec.digits)}
+            {p.entryPrice.toFixed(spec.digits)} → {mark.toFixed(spec.digits)}
           </div>
         </div>
         <strong className={pnl >= 0 ? 'profit' : 'loss'}>{money(pnl)}</strong>
@@ -84,35 +85,47 @@ export function TradePanel({ trading, spec }: { trading: Trading; spec: SymbolSp
   const [tab, setTab] = useState<'trade' | 'history'>('trade');
   const [kind, setKind] = useState<OrderKind>('market');
   const [lots, setLots] = useState('0.10');
+  const [sizing, setSizing] = useState<'lots' | 'risk'>('lots');
+  const [riskPct, setRiskPct] = useState('1');
   const [price, setPrice] = useState('');
   const [sl, setSl] = useState('');
   const [tp, setTp] = useState('');
   const [error, setError] = useState<string | null>(null);
   const { state } = trading;
 
-  const lotsN = Number(lots);
-  const entry = kind === 'market' ? trading.price : Number(price) || trading.price;
-  const riskSide: Side = kind === 'market' ? 'buy' : (kind.split('-')[0] as Side);
   const slN = num(sl);
   const tpN = num(tp);
-  const risk = slN !== null && lotsN > 0 ? Math.abs(pnlUsd(spec, riskSide, lotsN, entry, slN)) : null;
-  const reward = tpN !== null && lotsN > 0 ? Math.abs(pnlUsd(spec, riskSide, lotsN, entry, tpN)) : null;
+  // For market orders the side isn't known until a button is pressed; infer it from the SL.
+  const riskSide: Side =
+    kind !== 'market' ? (kind.split('-')[0] as Side) : slN !== null && slN > trading.price ? 'sell' : 'buy';
+  const marketEntry = riskSide === 'buy' ? trading.ask : trading.price;
+  const entry = kind === 'market' ? marketEntry : Number(price) || marketEntry;
+  const commissionPerLot = state.commission ?? 0;
+  /** Loss in USD per 1.00 lot if the stop is hit, including commission. */
+  const lossPerLot = slN !== null ? Math.abs(pnlUsd(spec, riskSide, 1, entry, slN)) + commissionPerLot : null;
+  const lotsN =
+    sizing === 'lots'
+      ? Number(lots)
+      : lossPerLot
+        ? Math.floor(((state.balance * Number(riskPct)) / 100 / lossPerLot) * 100) / 100
+        : 0;
+  const risk = lossPerLot !== null && lotsN > 0 ? lossPerLot * lotsN : null;
+  const reward =
+    tpN !== null && lotsN > 0 ? Math.abs(pnlUsd(spec, riskSide, lotsN, entry, tpN)) - commissionPerLot * lotsN : null;
 
   const submit = (side: Side) => {
+    if (sizing === 'risk' && slN === null) return setError('Set a stop loss to size by risk');
     if (!(lotsN >= 0.01)) return setError('Volume must be at least 0.01 lots');
     if (kind === 'market') {
-      const err = levelError(side, trading.price, slN, tpN);
+      const err = levelError(side, side === 'buy' ? trading.ask : trading.price, slN, tpN);
       if (err) return setError(err);
       trading.marketOrder(side, lotsN, slN, tpN);
     } else {
       const type = kind.split('-')[1] as PendingType;
       const p = Number(price);
       if (!(p > 0)) return setError('Enter the order price');
-      const above = p > trading.price;
-      const wantAbove = (side === 'buy') === (type === 'stop');
-      if (above !== wantAbove) {
-        return setError(`A ${side} ${type} must be ${wantAbove ? 'above' : 'below'} the current price`);
-      }
+      const priceErr = pendingPriceError(side, type, p, trading.price, trading.ask);
+      if (priceErr) return setError(priceErr);
       const err = levelError(side, p, slN, tpN);
       if (err) return setError(err);
       trading.pendingOrder({ side, type, price: p, lots: lotsN, sl: slN, tp: tpN });
@@ -160,8 +173,19 @@ export function TradePanel({ trading, spec }: { trading: Trading; spec: SymbolSp
             </select>
             <div className="row">
               <label className="field">
-                Volume (lots)
-                <input type="number" min="0.01" step="0.01" value={lots} onChange={(e) => setLots(e.target.value)} />
+                <select
+                  className="inline-select"
+                  value={sizing}
+                  onChange={(e) => setSizing(e.target.value as 'lots' | 'risk')}
+                >
+                  <option value="lots">Volume (lots)</option>
+                  <option value="risk">Risk (% of balance)</option>
+                </select>
+                {sizing === 'lots' ? (
+                  <input type="number" min="0.01" step="0.01" value={lots} onChange={(e) => setLots(e.target.value)} />
+                ) : (
+                  <input type="number" min="0.1" step="0.1" value={riskPct} onChange={(e) => setRiskPct(e.target.value)} />
+                )}
               </label>
               {kind !== 'market' && (
                 <label className="field">
@@ -185,8 +209,9 @@ export function TradePanel({ trading, spec }: { trading: Trading; spec: SymbolSp
                 <input inputMode="decimal" value={tp} placeholder="none" onChange={(e) => setTp(e.target.value)} />
               </label>
             </div>
-            {(risk !== null || reward !== null) && (
+            {(risk !== null || reward !== null || sizing === 'risk') && (
               <div className="muted small">
+                {sizing === 'risk' && (slN === null ? 'Set a stop loss to size by risk · ' : `${lotsN.toFixed(2)} lots · `)}
                 {risk !== null && <>Risk {money(risk)} ({((risk / state.balance) * 100).toFixed(1)}%)</>}
                 {risk !== null && reward !== null && ' · '}
                 {reward !== null && <>Reward {money(reward)}</>}
@@ -202,7 +227,7 @@ export function TradePanel({ trading, spec }: { trading: Trading; spec: SymbolSp
                 </button>
                 <button className="buy-btn" onClick={() => submit('buy')}>
                   BUY
-                  <small>{trading.price.toFixed(spec.digits)}</small>
+                  <small>{trading.ask.toFixed(spec.digits)}</small>
                 </button>
               </div>
             ) : (

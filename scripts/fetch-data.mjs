@@ -10,6 +10,7 @@
 // Raw downloads are cached in .histdata-cache / .dukascopy-cache so re-running is fast.
 
 import { getHistoricalRates } from 'dukascopy-node';
+import { encodeBars } from './codec.mjs';
 import { fetchHistdata } from './histdata.mjs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -151,7 +152,7 @@ async function main() {
       continue;
     }
     const file = `${symbol}.json`;
-    await writeFile(path.join(OUT_DIR, file), JSON.stringify({ symbol, baseSeconds: 60, bars: list }));
+    await writeFile(path.join(OUT_DIR, file), JSON.stringify(encodeBars(symbol, 60, DIGITS[symbol] ?? 5, list)));
     index = index.filter((d) => d.symbol !== symbol);
     index.push({ symbol, file, from: list[0][0], to: list[list.length - 1][0], count: list.length });
     console.log(`  saved ${file} (${list.length} bars)`);
