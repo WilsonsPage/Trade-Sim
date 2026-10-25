@@ -3,6 +3,9 @@ import { AreaSeries, ColorType, createChart, type UTCTimestamp } from 'lightweig
 import { symbolSpec } from '../data/symbols';
 import type { SavedSession } from '../sessions/sessions';
 import { computeStats } from '../trading/stats';
+import { byHour, bySession, byTag, byWeekday, dailyPnl, type Bucket } from '../trading/breakdown';
+import type { ClosedTrade } from '../trading/engine';
+import { Shot } from './Journal';
 
 const money = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -32,6 +35,83 @@ function EquityChart({ session }: { session: SavedSession }) {
     return () => chart.remove();
   }, [session]);
   return <div ref={ref} className="equity-chart" />;
+}
+
+const DAY = 86_400;
+/** Short money for calendar cells: whole dollars, e.g. -$32. */
+const compact = (n: number) => `${n < 0 ? '-' : '+'}$${Math.round(Math.abs(n)).toLocaleString()}`;
+
+/** Month grids of closed P/L per day, like a trading journal calendar. */
+function PnlCalendar({ trades }: { trades: ClosedTrade[] }) {
+  const days = dailyPnl(trades);
+  const keys = [...days.keys()];
+  const first = new Date(Math.min(...keys) * DAY * 1000);
+  const last = new Date(Math.max(...keys) * DAY * 1000);
+  const months: Date[] = [];
+  for (let m = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), 1)); m <= last; m = new Date(Date.UTC(m.getUTCFullYear(), m.getUTCMonth() + 1, 1))) {
+    months.push(m);
+  }
+  return (
+    <div className="calendars">
+      {months.map((m) => {
+        const start = m.getTime() / 1000 / DAY;
+        const length = new Date(Date.UTC(m.getUTCFullYear(), m.getUTCMonth() + 1, 0)).getUTCDate();
+        const lead = (m.getUTCDay() + 6) % 7; // Monday first
+        const monthPnl = Array.from({ length }, (_, i) => days.get(start + i)?.pnl ?? 0).reduce((a, b) => a + b, 0);
+        return (
+          <div key={start} className="calendar">
+            <div className="row">
+              <strong className="grow">{m.toLocaleString('en', { month: 'long', year: 'numeric', timeZone: 'UTC' })}</strong>
+              <span className={monthPnl >= 0 ? 'profit' : 'loss'}>{money(monthPnl)}</span>
+            </div>
+            <div className="cal-grid">
+              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+                <span key={d} className="cal-head muted small">
+                  {d}
+                </span>
+              ))}
+              {Array.from({ length: lead }, (_, i) => (
+                <span key={`b${i}`} />
+              ))}
+              {Array.from({ length }, (_, i) => {
+                const d = days.get(start + i);
+                return (
+                  <span key={i} className={`cal-day${d ? (d.pnl >= 0 ? ' up' : ' down') : ''}`} title={d ? `${d.trades} trade(s)` : ''}>
+                    <span className="muted small">{i + 1}</span>
+                    {d && <strong className="small">{compact(d.pnl)}</strong>}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function BreakdownTable({ title, rows }: { title: string; rows: Bucket[] }) {
+  const max = Math.max(1, ...rows.map((r) => Math.abs(r.pnl)));
+  return (
+    <div className="breakdown">
+      <h3>{title}</h3>
+      <table>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.label}>
+              <td>{r.label}</td>
+              <td className="muted">{r.trades}</td>
+              <td className="muted">{r.trades ? pct(r.wins / r.trades) : '—'}</td>
+              <td className={r.pnl >= 0 ? 'profit' : 'loss'}>{money(r.pnl)}</td>
+              <td className="bar-cell">
+                <span className={`bar ${r.pnl >= 0 ? 'up' : 'down'}`} style={{ width: `${(Math.abs(r.pnl) / max) * 100}%` }} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 export function Report({ session, onBack }: { session: SavedSession; onBack: () => void }) {
@@ -103,6 +183,18 @@ export function Report({ session, onBack }: { session: SavedSession; onBack: () 
 
       {s.trades > 0 && (
         <>
+          <h2>P/L calendar</h2>
+          <PnlCalendar trades={session.trading.history} />
+
+          <h2>When and how you win</h2>
+          <p className="muted small">Trades · win rate · P/L, grouped by when each trade was opened (UTC) and by your tags.</p>
+          <div className="breakdowns">
+            <BreakdownTable title="Session (UTC hours)" rows={bySession(session.trading.history)} />
+            <BreakdownTable title="Day of week" rows={byWeekday(session.trading.history)} />
+            <BreakdownTable title="Hour" rows={byHour(session.trading.history)} />
+            <BreakdownTable title="Tag" rows={byTag(session.trading.history)} />
+          </div>
+
           <h2>Trades</h2>
           <div className="table-wrap">
             <table>
@@ -117,6 +209,7 @@ export function Report({ session, onBack }: { session: SavedSession; onBack: () 
                   <th>Closed</th>
                   <th>Exit</th>
                   <th>P/L</th>
+                  <th>Journal</th>
                 </tr>
               </thead>
               <tbody>
@@ -131,6 +224,15 @@ export function Report({ session, onBack }: { session: SavedSession; onBack: () 
                     <td>{fmtTime(t.exitTime)}</td>
                     <td>{t.reason.toUpperCase()}</td>
                     <td className={t.pnl >= 0 ? 'profit' : 'loss'}>{money(t.pnl)}</td>
+                    <td className="journal-cell">
+                      {t.tags?.map((tag) => (
+                        <span key={tag} className="tag">
+                          {tag}
+                        </span>
+                      ))}
+                      {t.note && <div className="note-text">{t.note}</div>}
+                      {t.hasShot && <Shot tradeId={t.id} />}
+                    </td>
                   </tr>
                 ))}
               </tbody>

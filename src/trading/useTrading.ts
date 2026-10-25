@@ -85,6 +85,7 @@ export function useTrading(
     modifyOrder: (id: string, fields: Partial<Pick<PendingOrder, 'price' | 'sl' | 'tp'>>) =>
       setState((s) => engine.modifyOrder(s, id, fields)),
     modify: (id: string, sl: number | null, tp: number | null) => setState((s) => engine.modifyPosition(s, id, sl, tp)),
+    annotate: (id: string, fields: engine.JournalFields) => setState((s) => engine.annotate(s, id, fields)),
     setAutoBreakeven: (r: number | null) => setState((s) => ({ ...s, autoBreakevenR: r })),
     /** Steps that can be undone. */
     rewindable,

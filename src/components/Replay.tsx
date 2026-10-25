@@ -11,8 +11,9 @@ import { COLORS, DrawingToolbar } from './DrawingToolbar';
 import { DrawingLayer } from './DrawingLayer';
 import { IndicatorLayer } from './IndicatorLayer';
 import { IndicatorsDialog } from './IndicatorsDialog';
-import { ReplayChart } from './ReplayChart';
+import { ReplayChart, type ChartApi } from './ReplayChart';
 import { ChartOrderMenu } from './ChartOrderMenu';
+import { captureChart } from './captureChart';
 import { GoToMenu } from './GoToMenu';
 import { indexAtTime } from '../data/aggregate';
 import { TradeLines, type DragTarget, type LineAction } from './TradeLines';
@@ -63,6 +64,17 @@ function useIndicators(key: string) {
   };
   const onErrors = useCallback((e: Record<string, string>) => setErrors(e), []);
   return { defs, change, errors, onErrors, enabled: defs.filter((d) => d.enabled).length };
+}
+
+/** Keeps a ref to a chart's API while it is mounted. */
+function KeepApi({ api, into }: { api: ChartApi; into: { current: ChartApi | null } }) {
+  useEffect(() => {
+    into.current = api;
+    return () => {
+      if (into.current === api) into.current = null;
+    };
+  }, [api, into]);
+  return null;
 }
 
 interface Props {
@@ -204,6 +216,9 @@ export function Replay({ config, onExit, onEnd }: Props) {
     // Only when the status changes.
   }, [challengeStatus]);
 
+  const mainApi = useRef<ChartApi | null>(null);
+  const capture = async () => (mainApi.current ? captureChart(mainApi.current) : null);
+
   const stepBack = () => {
     const p = trading.rewind();
     if (p !== null) replay.seek(p);
@@ -322,6 +337,7 @@ export function Replay({ config, onExit, onEnd }: Props) {
             <ReplayChart view={replay.view} digits={spec.digits}>
               {(api) => (
                 <>
+                  <KeepApi api={api} into={mainApi} />
                   <IndicatorLayer api={api} view={replay.view} defs={indicators.defs} onErrors={indicators.onErrors} />
                   <TradeLines
                     api={api}
@@ -393,7 +409,7 @@ export function Replay({ config, onExit, onEnd }: Props) {
         </div>
         <aside className="panel">
           {replay.atEnd && <p className="notice">End of data reached.</p>}
-          <TradePanel trading={trading} spec={spec} />
+          <TradePanel trading={trading} spec={spec} capture={capture} />
         </aside>
       </main>
 

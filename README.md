@@ -83,6 +83,10 @@ The right-hand panel works like the MT5 mobile app:
 
 Orders fill on M1 data inside each chart bar. If SL and TP are both touched in the same minute, the stop loss is assumed to hit first, and a gap through a level fills at the open. P/L is in USD (USD-based pairs such as USDJPY are converted at the exit price) and includes commission. Swap and margin are not modelled.
 
+## Journal and analytics
+
+Tap any open position or closed trade (History tab) to add **notes**, **tags** (e.g. *breakout, A+ setup, FOMO*) and a **📷 screenshot** of the chart, drawings included. The end-of-session report adds a **P/L calendar**, results by **session**, **day of week**, **hour** and **tag** (trades, win rate and P/L for each), and your notes, tags and screenshots next to every trade. Screenshots are stored in your browser with the session and deleted with it.
+
 ## Prop firm challenge mode
 
 When starting a session, pick a **Challenge**: *2-step phase 1* (8% target, 5% daily loss, 10% max loss, 4 trading days), *phase 2* (5% / 5% / 10%), *1-step* (10% / 3% / 6%) or your own numbers. The panel tracks progress to the target and how much loss room is left. Like a real evaluation, limits use equity including open trades (at the worst price each minute), the daily limit resets at 00:00 UTC from that day's starting balance, and breaking a limit closes everything and stops trading. The challenge passes once the target is banked with no trades open and the minimum trading days are met. The result shows on the session list and in the report.
@@ -108,3 +112,4 @@ Found a security problem? Please report it privately through the repository's **
 3. ✅ Saved sessions and end-of-session stats
 4. ✅ Polish and mobile: phone layout, draggable levels, spread/commission, risk sizing, compact data
 5. ✅ Split screen with a second market, more markets, security hardening
+6. ✅ Trading from the chart, step back, go to session, auto breakeven, prop firm challenges, journal and analytics

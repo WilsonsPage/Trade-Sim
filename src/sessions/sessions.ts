@@ -28,7 +28,18 @@ export const listSessions = async () =>
 
 export const saveSession = (s: SavedSession) => db.put('sessions', s);
 
-export const deleteSession = (id: string) => db.delete('sessions', id);
+export async function deleteSession(id: string) {
+  const s = await db.get<SavedSession>('sessions', id);
+  for (const t of [...(s?.trading.history ?? []), ...(s?.trading.positions ?? [])]) {
+    if (t.hasShot) await db.delete('shots', t.id).catch(() => {});
+  }
+  await db.delete('sessions', id);
+}
+
+/** A trade's chart screenshot, as a JPEG data URL. */
+export const loadShot = (tradeId: string) => db.get<string>('shots', tradeId);
+export const saveShot = (tradeId: string, dataUrl: string) => db.put('shots', dataUrl, tradeId);
+export const deleteShot = (tradeId: string) => db.delete('shots', tradeId);
 
 /** Keeps a copy of an imported CSV so its sessions can be resumed. */
 export async function storeImported(dataset: Dataset): Promise<DatasetSource> {

@@ -28,6 +28,18 @@ export interface Position {
   risk?: number | null;
   /** Set once auto breakeven has moved the stop to entry. */
   atBreakeven?: boolean;
+  /** Journal: the trader's notes, tags, and whether a chart screenshot is stored. */
+  note?: string;
+  tags?: string[];
+  hasShot?: boolean;
+}
+
+export type JournalFields = Partial<Pick<Position, 'note' | 'tags' | 'hasShot'>>;
+
+/** Updates journal fields on an open position or a closed trade. */
+export function annotate(state: TradingState, id: string, fields: JournalFields): TradingState {
+  const apply = <T extends Position>(list: T[]) => list.map((t) => (t.id === id ? { ...t, ...fields } : t));
+  return { ...state, positions: apply(state.positions), history: apply(state.history) };
 }
 
 export interface ClosedTrade extends Position {
