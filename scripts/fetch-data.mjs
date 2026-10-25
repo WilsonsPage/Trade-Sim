@@ -15,9 +15,14 @@ import { fetchHistdata } from './histdata.mjs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const SYMBOLS = ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD', 'XAUUSD'];
+const SYMBOLS = [
+  'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD',
+  'XAUUSD', 'XAGUSD', // gold, silver
+  'UDXUSD', 'SPXUSD', 'NSXUSD', // US dollar index, S&P 500, Nasdaq 100 (histdata.com only)
+  'WTIUSD', 'BCOUSD', // WTI and Brent crude oil (histdata.com only)
+];
 const OUT_DIR = path.resolve('public/data');
-const DIGITS = { USDJPY: 3, XAUUSD: 3 };
+const DIGITS = { USDJPY: 3, XAUUSD: 3, XAGUSD: 3, UDXUSD: 3, SPXUSD: 3, NSXUSD: 3, WTIUSD: 3, BCOUSD: 3 };
 const round = (n, d) => Math.round(n * 10 ** d) / 10 ** d;
 
 function parseArgs(argv) {
