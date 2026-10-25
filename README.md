@@ -83,6 +83,10 @@ The right-hand panel works like the MT5 mobile app:
 
 Orders fill on M1 data inside each chart bar. If SL and TP are both touched in the same minute, the stop loss is assumed to hit first, and a gap through a level fills at the open. P/L is in USD (USD-based pairs such as USDJPY are converted at the exit price) and includes commission. Swap and margin are not modelled.
 
+## Prop firm challenge mode
+
+When starting a session, pick a **Challenge**: *2-step phase 1* (8% target, 5% daily loss, 10% max loss, 4 trading days), *phase 2* (5% / 5% / 10%), *1-step* (10% / 3% / 6%) or your own numbers. The panel tracks progress to the target and how much loss room is left. Like a real evaluation, limits use equity including open trades (at the worst price each minute), the daily limit resets at 00:00 UTC from that day's starting balance, and breaking a limit closes everything and stops trading. The challenge passes once the target is banked with no trades open and the minimum trading days are met. The result shows on the session list and in the report.
+
 ## Sessions and stats
 
 Every session autosaves in your browser (IndexedDB) as you replay and trade. Use **←** to leave, then **Resume** it later from the start screen. **End session** closes anything open at the current price and shows the report: net P/L, return, trade count, strike rate, profit factor, max drawdown, average R, expectancy, average/largest win and loss, streaks, average hold time, a long/short split, an equity curve and the full trade list. Finished sessions stay listed so you can compare them.

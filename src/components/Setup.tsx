@@ -10,7 +10,7 @@ import {
   type DatasetSource,
   type SavedSession,
 } from '../sessions/sessions';
-import type { TradingState } from '../trading/engine';
+import type { ChallengeRules, TradingState } from '../trading/engine';
 import type { Dataset } from '../types';
 
 export interface SessionConfig {
@@ -26,6 +26,8 @@ export interface SessionConfig {
   /** Spread in pips and round-turn commission in USD per lot. */
   spreadPips: number;
   commission: number;
+  /** Prop firm style rules, if this session is a challenge. */
+  challenge?: ChallengeRules;
   /** Set when resuming a saved session. */
   initialPos?: number;
   initialTrading?: TradingState;
@@ -36,6 +38,13 @@ export interface SecondChart {
   source: DatasetSource;
   tfSeconds: number;
 }
+
+/** Common prop firm challenge shapes (limits as fractions of the starting balance). */
+const CHALLENGES: ChallengeRules[] = [
+  { name: '2-step, phase 1', profitTarget: 0.08, dailyLoss: 0.05, maxLoss: 0.1, minTradingDays: 4 },
+  { name: '2-step, phase 2', profitTarget: 0.05, dailyLoss: 0.05, maxLoss: 0.1, minTradingDays: 4 },
+  { name: '1-step', profitTarget: 0.1, dailyLoss: 0.03, maxLoss: 0.06, minTradingDays: 3 },
+];
 
 const tfLabel = (s: number) => TIMEFRAMES.find((tf) => tf.seconds === s)?.label ?? `${s}s`;
 const fmtMoney = (n: number) => `${n < 0 ? '-' : '+'}$${Math.abs(n).toFixed(2)}`;
@@ -60,6 +69,7 @@ export function Setup({ onStart, onReport }: Props) {
   const [commission, setCommission] = useState('0');
   const [status, setStatus] = useState('');
   const [second, setSecond] = useState<SecondChart | null>(null);
+  const [challenge, setChallenge] = useState<ChallengeRules | null>(null);
 
   useEffect(() => {
     loadIndex().then(setIndex);
@@ -172,6 +182,11 @@ export function Setup({ onStart, onReport }: Props) {
                       {s.trading.history.length} trades ·{' '}
                       <span className={pnl >= 0 ? 'profit' : 'loss'}>{fmtMoney(pnl)}</span> ·{' '}
                       {s.endedAt ? 'finished' : 'in progress'} · saved {new Date(s.updatedAt).toLocaleString()}
+                      {s.trading.challenge && (
+                        <span className={`badge challenge-${s.trading.challenge.status}`}>
+                          {s.trading.challenge.rules.name}: {s.trading.challenge.status}
+                        </span>
+                      )}
                     </div>
                   </div>
                   {s.endedAt ? (
@@ -302,10 +317,73 @@ export function Setup({ onStart, onReport }: Props) {
             </label>
           </div>
 
+          <h2>{index && index.length > 1 ? 6 : 5}. Challenge (optional)</h2>
+          <p className="muted small">
+            Practise a prop firm style evaluation: hit the profit target without breaking the daily or overall loss
+            limits. Limits use equity (including open trades) and reset at 00:00 UTC.
+          </p>
+          <div className="chips">
+            <button className={challenge ? 'chip' : 'chip active'} onClick={() => setChallenge(null)}>
+              None
+            </button>
+            {CHALLENGES.map((c) => (
+              <button
+                key={c.name}
+                className={challenge?.name === c.name ? 'chip active' : 'chip'}
+                onClick={() => setChallenge(c)}
+              >
+                {c.name}
+              </button>
+            ))}
+            <button
+              className={challenge?.name === 'Custom' ? 'chip active' : 'chip'}
+              onClick={() => setChallenge({ ...(challenge ?? CHALLENGES[0]), name: 'Custom' })}
+            >
+              Custom
+            </button>
+          </div>
+          {challenge && (
+            <div className="row account-setup challenge-rules">
+              {(
+                [
+                  ['Profit target %', 'profitTarget'],
+                  ['Daily loss limit %', 'dailyLoss'],
+                  ['Max loss limit %', 'maxLoss'],
+                ] as const
+              ).map(([label, key]) => (
+                <label key={key} className="field">
+                  {label}
+                  <input
+                    type="number"
+                    min="0.5"
+                    step="0.5"
+                    value={+(challenge[key] * 100).toFixed(2)}
+                    onChange={(e) => setChallenge({ ...challenge, name: 'Custom', [key]: Math.max(0, Number(e.target.value)) / 100 })}
+                  />
+                </label>
+              ))}
+              <label className="field">
+                Min trading days
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={challenge.minTradingDays}
+                  onChange={(e) => setChallenge({ ...challenge, name: 'Custom', minTradingDays: Math.max(0, Math.round(Number(e.target.value))) })}
+                />
+              </label>
+            </div>
+          )}
+
           <div>
             <button
               className="primary"
-              disabled={!start || !(Number(balance) > 0) || first! > last!}
+              disabled={
+                !start ||
+                !(Number(balance) > 0) ||
+                first! > last! ||
+                (!!challenge && !(challenge.profitTarget > 0 && challenge.dailyLoss > 0 && challenge.maxLoss > 0))
+              }
               onClick={() =>
                 onStart({
                   id: crypto.randomUUID(),
@@ -318,6 +396,7 @@ export function Setup({ onStart, onReport }: Props) {
                   startBalance: Number(balance),
                   spreadPips: Math.max(0, Number(spread) || 0),
                   commission: Math.max(0, Number(commission) || 0),
+                  challenge: challenge ?? undefined,
                 })
               }
             >

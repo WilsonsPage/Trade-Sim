@@ -168,6 +168,21 @@ th { color: var(--muted); font-weight: 500; }
 .be-setting { margin-top: 8px; flex-direction: row; align-items: center; }
 .be-setting select { padding: 3px 6px; }
 
+.challenge { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.challenge.challenge-failed { border-color: #ef5350; }
+.challenge.challenge-passed { border-color: #26a69a; }
+.badge.challenge-active { background: var(--accent); }
+.badge.challenge-failed { background: #ef5350; }
+.badge.challenge-passed { background: #26a69a; }
+.badge { text-transform: capitalize; }
+.meter { display: flex; flex-direction: column; gap: 3px; }
+.meter-track { height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.meter-fill { height: 100%; }
+.meter-fill.good { background: #26a69a; }
+.meter-fill.bad { background: #f7a600; }
+.challenge-rules { margin-top: 8px; }
+.report-challenge { margin: 12px 0; }
+
 /* Phones: chart on top, toolbar as a scrollable row, trade panel below. Keep last so it wins. */
 @media (max-width: 760px) {
   .replay { height: auto; min-height: 100%; }

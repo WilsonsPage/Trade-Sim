@@ -12,13 +12,16 @@ export function useTrading(
   dataset: Dataset,
   spec: SymbolSpec,
   pos: number,
-  costs: { startBalance: number; spread: number; commission: number },
+  costs: { startBalance: number; spread: number; commission: number; challenge?: engine.ChallengeRules },
   initial?: engine.TradingState,
 ) {
   const [state, setState] = useState(
-    () =>
-      initial ??
-      engine.initialState(costs.startBalance, dataset.bars[pos].time, costs.spread, costs.commission),
+    () => {
+      if (initial) return initial;
+      const time = dataset.bars[pos].time;
+      const s = engine.initialState(costs.startBalance, time, costs.spread, costs.commission);
+      return costs.challenge ? engine.startChallenge(s, costs.challenge, time) : s;
+    },
   );
   const processed = useRef(pos);
   const latest = useRef(state);

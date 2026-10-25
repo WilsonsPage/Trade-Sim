@@ -52,6 +52,80 @@ export interface TradingState {
   equityCurve: { time: number; equity: number }[];
   /** Move the stop to entry once a trade is this many R in profit; null is off. */
   autoBreakevenR?: number | null;
+  /** Prop firm style challenge rules and progress, if this session is a challenge. */
+  challenge?: Challenge;
+}
+
+/** Limits are fractions of the starting balance, e.g. 0.08 for 8%. */
+export interface ChallengeRules {
+  name: string;
+  profitTarget: number;
+  /** Max loss within one day (UTC), measured from that day's starting balance. */
+  dailyLoss: number;
+  /** Max loss overall, measured from the starting balance. */
+  maxLoss: number;
+  minTradingDays: number;
+}
+
+export interface Challenge {
+  rules: ChallengeRules;
+  /** UTC day number and the balance at its start, for the daily loss limit. */
+  day: number;
+  dayStartBalance: number;
+  status: 'active' | 'passed' | 'failed';
+  /** Why the challenge failed, and when it passed or failed. */
+  reason?: string;
+  decidedAt?: number;
+}
+
+const DAY = 86_400;
+
+export function startChallenge(state: TradingState, rules: ChallengeRules, time: number): TradingState {
+  return { ...state, challenge: { rules, day: Math.floor(time / DAY), dayStartBalance: state.balance, status: 'active' } };
+}
+
+/** Number of different UTC days on which a trade was opened. */
+export function tradingDays(state: TradingState): number {
+  return new Set([...state.history, ...state.positions].map((p) => Math.floor(p.entryTime / DAY))).size;
+}
+
+/** Checks challenge limits after a bar, closing everything if one is broken. */
+function checkChallenge(state: TradingState, spec: SymbolSpec, bar: Bar, ask: Bar): TradingState {
+  const c = state.challenge;
+  if (!c || c.status === 'failed') return state;
+  let s = state;
+  const day = Math.floor(bar.time / DAY);
+  if (day !== c.day) s = { ...s, challenge: { ...c, day, dayStartBalance: s.balance } };
+  const ch = s.challenge!;
+  const { rules } = ch;
+  const start = s.startBalance;
+
+  // Equity at the worst price each position saw in this minute.
+  const worst = s.positions.reduce(
+    (sum, p) =>
+      sum + pnlUsd(spec, p.side, p.lots, p.entryPrice, p.side === 'buy' ? bar.low : ask.high) - (s.commission ?? 0) * p.lots,
+    s.balance,
+  );
+  const reason =
+    worst <= start * (1 - rules.maxLoss)
+      ? `Max loss limit (${(rules.maxLoss * 100).toFixed(1)}%) broken`
+      : worst <= ch.dayStartBalance - rules.dailyLoss * start
+        ? `Daily loss limit (${(rules.dailyLoss * 100).toFixed(1)}%) broken`
+        : null;
+  if (reason) {
+    // Like a real challenge, the account is stopped out: everything closes at this bar's close.
+    const closed = endSession(s, spec, bar.close, bar.time);
+    return { ...closed, challenge: { ...ch, status: 'failed', reason, decidedAt: bar.time } };
+  }
+  if (
+    ch.status === 'active' &&
+    s.positions.length === 0 &&
+    s.balance >= start * (1 + rules.profitTarget) &&
+    tradingDays(s) >= rules.minTradingDays
+  ) {
+    return { ...s, challenge: { ...ch, status: 'passed', decidedAt: bar.time } };
+  }
+  return s;
 }
 
 export function initialState(startBalance: number, time: number, spread = 0, commission = 0): TradingState {
@@ -212,7 +286,7 @@ export function processBar(state: TradingState, spec: SymbolSpec, bar: Bar): Tra
       }
     }
   }
-  return s;
+  return checkChallenge(s, spec, bar, ask);
 }
 
 /** Closes all positions at `price` and drops pending orders. */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { symbolSpec } from '../data/symbols';
-import { closePosition, endSession, entryPrice, initialState, openPosition, placeOrder, pnlUsd, processBar } from './engine';
+import { closePosition, endSession, entryPrice, initialState, openPosition, placeOrder, pnlUsd, processBar, startChallenge } from './engine';
 
 const eurusd = symbolSpec('EURUSD');
 const bar = (open: number, high: number, low: number, close: number, time = 60) => ({ time, open, high, low, close });
@@ -105,5 +105,41 @@ describe('auto breakeven', () => {
     s = openPosition(s, { side: 'sell', lots: 1, sl: null, tp: null }, 1.1, 0);
     s = processBar(s, eurusd, bar(1.1, 1.1002, 1.0989, 1.0995));
     expect(s.positions.map((p) => p.sl)).toEqual([1.1, null]);
+  });
+});
+
+describe('challenge', () => {
+  const rules = { name: 'Test', profitTarget: 0.08, dailyLoss: 0.05, maxLoss: 0.1, minTradingDays: 1 };
+  const DAY = 86_400;
+  const start = startChallenge(initialState(10_000, 0), rules, 0);
+
+  it('fails on the daily loss limit using the worst price in the minute, and closes everything', () => {
+    // 1 lot EURUSD: $10 per pip. A 50 pip drop is -$500 = 5% of $10k.
+    let s = openPosition(start, { side: 'buy', lots: 1, sl: null, tp: null }, 1.1, 60);
+    s = processBar(s, eurusd, bar(1.1, 1.1, 1.0951, 1.098, 120));
+    expect(s.challenge!.status).toBe('active');
+    s = processBar(s, eurusd, bar(1.098, 1.098, 1.095, 1.097, 180));
+    expect(s.challenge).toMatchObject({ status: 'failed', decidedAt: 180 });
+    expect(s.challenge!.reason).toMatch(/Daily loss/);
+    expect(s.positions).toHaveLength(0);
+    expect(s.history[0]).toMatchObject({ reason: 'end', exitPrice: 1.097 });
+  });
+
+  it('resets the daily limit each day but keeps the overall limit', () => {
+    let s = openPosition(start, { side: 'buy', lots: 1, sl: null, tp: null }, 1.1, 60);
+    s = processBar(s, eurusd, bar(1.1, 1.1, 1.096, 1.096, 120)); // -$400 on day 0
+    s = closePosition(s, eurusd, s.positions[0].id, 1.096, 120, 'manual');
+    s = openPosition(s, { side: 'buy', lots: 1, sl: null, tp: null }, 1.096, DAY + 60);
+    s = processBar(s, eurusd, bar(1.096, 1.096, 1.0915, 1.092, DAY + 120)); // -$450 on day 1: daily ok
+    expect(s.challenge!.status).toBe('active');
+    s = processBar(s, eurusd, bar(1.092, 1.092, 1.0859, 1.09, DAY + 180)); // total below -$1000
+    expect(s.challenge!.reason).toMatch(/Max loss/);
+  });
+
+  it('passes once the target is banked with no open trades', () => {
+    let s = openPosition(start, { side: 'buy', lots: 1, sl: null, tp: 1.108 }, 1.1, 60);
+    s = processBar(s, eurusd, bar(1.1, 1.1085, 1.1, 1.108, 120));
+    expect(s.balance).toBeCloseTo(10_800);
+    expect(s.challenge).toMatchObject({ status: 'passed', decidedAt: 120 });
   });
 });

@@ -70,6 +70,25 @@ export function Report({ session, onBack }: { session: SavedSession; onBack: () 
         {money(session.trading.balance)}
       </p>
 
+      {session.trading.challenge && (
+        <div className={`challenge challenge-${session.trading.challenge.status} report-challenge`}>
+          <div className="row">
+            <strong className="grow">{session.trading.challenge.rules.name} challenge</strong>
+            <span className={`badge challenge-${session.trading.challenge.status}`}>
+              {session.trading.challenge.status === 'active' ? 'not passed' : session.trading.challenge.status}
+            </span>
+          </div>
+          <span className="muted small">
+            Target {pct(session.trading.challenge.rules.profitTarget)} · daily loss limit{' '}
+            {pct(session.trading.challenge.rules.dailyLoss)} · max loss limit {pct(session.trading.challenge.rules.maxLoss)}
+            {session.trading.challenge.rules.minTradingDays > 0 &&
+              ` · at least ${session.trading.challenge.rules.minTradingDays} trading days`}
+            {session.trading.challenge.decidedAt && ` · decided ${fmtTime(session.trading.challenge.decidedAt)} UTC`}
+          </span>
+          {session.trading.challenge.reason && <span className="error small">{session.trading.challenge.reason}</span>}
+        </div>
+      )}
+
       <div className="stat-grid">
         {tiles.map(([label, value, cls]) => (
           <div key={label} className="stat">

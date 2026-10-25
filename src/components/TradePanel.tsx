@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { SymbolSpec } from '../data/symbols';
-import { pnlUsd, type PendingType, type Position, type Side } from '../trading/engine';
+import { pnlUsd, tradingDays, type PendingType, type Position, type Side } from '../trading/engine';
 import type { Trading } from '../trading/useTrading';
 import { levelError, pendingPriceError } from '../trading/validate';
 
@@ -82,6 +82,48 @@ function PositionRow({ p, trading, spec }: { p: Position; trading: Trading; spec
   );
 }
 
+function ChallengeCard({ trading }: { trading: Trading }) {
+  const { state, equity } = trading;
+  const c = state.challenge!;
+  const { rules } = c;
+  const start = state.startBalance;
+  const target = start * rules.profitTarget;
+  const dailyLeft = equity - (c.dayStartBalance - rules.dailyLoss * start);
+  const maxLeft = equity - start * (1 - rules.maxLoss);
+  const days = tradingDays(state);
+  const meter = (label: string, value: string, fraction: number, tone: 'good' | 'bad') => (
+    <div className="meter">
+      <div className="row small">
+        <span className="grow muted">{label}</span>
+        <span>{value}</span>
+      </div>
+      <div className="meter-track">
+        <div className={`meter-fill ${tone}`} style={{ width: `${Math.max(0, Math.min(1, fraction)) * 100}%` }} />
+      </div>
+    </div>
+  );
+  return (
+    <div className={`challenge challenge-${c.status}`}>
+      <div className="row">
+        <strong className="grow">{rules.name} challenge</strong>
+        <span className={`badge challenge-${c.status}`}>{c.status}</span>
+      </div>
+      {c.reason && <div className="error small">{c.reason}</div>}
+      {meter('Profit target', `${money(state.balance - start)} / ${money(target)}`, (state.balance - start) / target, 'good')}
+      {meter('Daily loss left', money(Math.max(0, dailyLeft)), dailyLeft / (rules.dailyLoss * start), 'bad')}
+      {meter('Max loss left', money(Math.max(0, maxLeft)), maxLeft / (rules.maxLoss * start), 'bad')}
+      {rules.minTradingDays > 0 && (
+        <div className="row small">
+          <span className="grow muted">Trading days</span>
+          <span>
+            {days} / {rules.minTradingDays}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TradePanel({ trading, spec }: { trading: Trading; spec: SymbolSpec }) {
   const [tab, setTab] = useState<'trade' | 'history'>('trade');
   const [kind, setKind] = useState<OrderKind>('market');
@@ -114,7 +156,10 @@ export function TradePanel({ trading, spec }: { trading: Trading; spec: SymbolSp
   const reward =
     tpN !== null && lotsN > 0 ? Math.abs(pnlUsd(spec, riskSide, lotsN, entry, tpN)) - commissionPerLot * lotsN : null;
 
+  const failed = state.challenge?.status === 'failed';
+
   const submit = (side: Side) => {
+    if (failed) return setError('The challenge has failed, so trading is closed. End the session to see your report.');
     if (sizing === 'risk' && slN === null) return setError('Set a stop loss to size by risk');
     if (!(lotsN >= 0.01)) return setError('Volume must be at least 0.01 lots');
     if (kind === 'market') {
@@ -152,6 +197,8 @@ export function TradePanel({ trading, spec }: { trading: Trading; spec: SymbolSp
           <strong className={trading.floating >= 0 ? 'profit' : 'loss'}>{money(trading.floating)}</strong>
         </div>
       </div>
+
+      {state.challenge && <ChallengeCard trading={trading} />}
 
       <div className="tabs">
         <button className={tab === 'trade' ? 'active' : ''} onClick={() => setTab('trade')}>

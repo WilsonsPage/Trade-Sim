@@ -83,7 +83,12 @@ export function Replay({ config, onExit, onEnd }: Props) {
     dataset,
     spec,
     replay.pos,
-    { startBalance: config.startBalance, spread: config.spreadPips * spec.pip, commission: config.commission },
+    {
+      startBalance: config.startBalance,
+      spread: config.spreadPips * spec.pip,
+      commission: config.commission,
+      challenge: config.challenge,
+    },
     config.initialTrading,
   );
 
@@ -191,6 +196,13 @@ export function Replay({ config, onExit, onEnd }: Props) {
     trading.modifyOrder(o.id, next);
     return true;
   };
+
+  // Stop playing when a challenge fails or passes, so it isn't missed.
+  const challengeStatus = trading.state.challenge?.status;
+  useEffect(() => {
+    if (challengeStatus && challengeStatus !== 'active' && replay.playing) replay.togglePlay();
+    // Only when the status changes.
+  }, [challengeStatus]);
 
   const stepBack = () => {
     const p = trading.rewind();
@@ -326,7 +338,11 @@ export function Replay({ config, onExit, onEnd }: Props) {
                     digits={spec.digits}
                     bid={trading.price}
                     ask={trading.ask}
-                    onPlace={(side, type, price, lots) => trading.pendingOrder({ side, type, price, lots, sl: null, tp: null })}
+                    onPlace={(side, type, price, lots) => {
+                      if (trading.state.challenge?.status !== 'failed') {
+                        trading.pendingOrder({ side, type, price, lots, sl: null, tp: null });
+                      }
+                    }}
                   />
                   <DrawingLayer
                     api={api}
