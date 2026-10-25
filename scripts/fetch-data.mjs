@@ -150,8 +150,10 @@ async function main() {
     }
   }
 
+  const summary = [];
   for (const symbol of symbols) {
     const list = bars[symbol].sort((a, b) => a[0] - b[0]);
+    summary.push(`${symbol} ${list.length}`);
     if (!list.length) {
       warn(`${symbol}: no data downloaded`);
       continue;
@@ -163,6 +165,8 @@ async function main() {
     console.log(`  saved ${file} (${list.length} bars)`);
     notice(`${symbol}: saved ${list.length} bars`);
   }
+  // GitHub shows only 10 annotations of each kind per step, so also give one line for everything.
+  notice(`bars per symbol: ${summary.join(', ')}`);
   index.sort((a, b) => SYMBOLS.indexOf(a.symbol) - SYMBOLS.indexOf(b.symbol));
   await writeFile(path.join(OUT_DIR, 'index.json'), JSON.stringify(index, null, 2));
 }
