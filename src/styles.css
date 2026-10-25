@@ -50,7 +50,100 @@ code { background: var(--panel); padding: 1px 5px; border-radius: 3px; }
 .panel { width: 320px; border-left: 1px solid var(--border); padding: 12px; overflow-y: auto; }
 .panel h3 { margin: 0 0 8px; font-size: 14px; }
 
+
+
+.chart { position: relative; }
+.chart-canvas { position: absolute; inset: 0; }
+.drawing-layer { position: absolute; top: 0; left: 0; z-index: 3; pointer-events: none; overflow: hidden; }
+.drawing-layer.active { pointer-events: all; cursor: crosshair; }
+.drawing-layer .shape { pointer-events: all; cursor: move; }
+.drawing-layer .handle { pointer-events: all; cursor: grab; }
+
+.draw-toolbar {
+  width: 44px; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 6px 0; border-right: 1px solid var(--border); background: var(--panel); overflow-y: auto;
+}
+.draw-toolbar button { width: 32px; height: 32px; padding: 0; border-color: transparent; font-size: 16px; }
+.draw-toolbar button.active { border-color: var(--accent); }
+.draw-toolbar .swatch { width: 18px; height: 18px; border-radius: 50%; border: 2px solid transparent; }
+.draw-toolbar .swatch.active { border-color: #fff; }
+.draw-toolbar .sep { height: 1px; width: 24px; background: var(--border); margin: 4px 0; }
+
+.dialog-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 10; padding: 16px; }
+.dialog { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; width: 560px; max-width: 100%; max-height: 90vh; overflow-y: auto; }
+.dialog h3 { margin: 0 0 12px; }
+.dialog h4 { margin: 16px 0 8px; font-size: 13px; }
+.row { display: flex; align-items: center; gap: 8px; }
+.grow { flex: 1; }
+.indicator-row { padding: 4px 0; }
+.wide { width: 100%; margin-bottom: 8px; }
+textarea.code {
+  width: 100%; height: 260px; font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace; color: var(--text);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 8px; resize: vertical;
+}
+pre { white-space: pre-wrap; font-size: 12px; }
+.error { color: #ef5350; }
+button.primary-inline { background: var(--accent); border-color: var(--accent); }
+
+.trade-panel { display: flex; flex-direction: column; gap: 8px; }
+.trade-panel h4 { margin: 12px 0 4px; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+.account { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.account div { display: flex; flex-direction: column; font-size: 12px; }
+.account strong { font-size: 14px; }
+.tabs { display: flex; gap: 4px; }
+.tabs button { flex: 1; }
+.tabs button.active { border-color: var(--accent); color: #fff; }
+.order-form { display: flex; flex-direction: column; gap: 8px; }
+.order-form .row > * { flex: 1; min-width: 0; }
+.field { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.field input { width: 100%; }
+.buy-btn, .sell-btn { flex: 1; display: flex; flex-direction: column; align-items: center; font-weight: 600; padding: 8px; color: #fff; }
+.buy-btn { background: #2962ff; border-color: #2962ff; }
+.sell-btn { background: #ef5350; border-color: #ef5350; }
+.buy-btn small, .sell-btn small { font-weight: 400; opacity: 0.85; }
+.trade-row { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.trade-edit { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.trade-edit .row > * { flex: 1; }
+.close-btn { border-color: #f7a600; }
+.buy { color: #2962ff; text-transform: capitalize; }
+.sell { color: #ef5350; text-transform: capitalize; }
+.profit { color: #26a69a; }
+.loss { color: #ef5350; }
+.small { font-size: 12px; }
+button.link { background: none; border: none; color: var(--accent); padding: 0; font-size: 12px; }
+
+.end-btn { border-color: #f7a600; }
+.sessions { display: flex; flex-direction: column; }
+.session-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+
+.report { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+.report h1 { font-size: 20px; margin: 0; }
+.report h2 { font-size: 15px; margin: 24px 0 8px; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.stat { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 4px; }
+.stat strong { font-size: 16px; }
+.equity-chart { height: 280px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; }
+.account-setup { flex-wrap: wrap; }
+.account-setup .field { flex: 1; min-width: 150px; }
+.inline-select { padding: 0; border: none; background: none; color: var(--muted); font-size: 12px; }
+
+/* Phones: chart on top, toolbar as a scrollable row, trade panel below. Keep last so it wins. */
 @media (max-width: 760px) {
+  .replay { height: auto; min-height: 100%; }
+  .toolbar { gap: 6px; padding: 6px; }
+  .toolbar button, .toolbar select { padding: 5px 8px; }
+  .toolbar .divider, .toolbar .clock { display: none; }
   .body { flex-direction: column; }
-  .panel { width: auto; border-left: 0; border-top: 1px solid var(--border); max-height: 40%; }
+  .draw-toolbar {
+    width: auto; height: 44px; flex-direction: row; padding: 0 6px;
+    border-right: 0; border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden;
+  }
+  .draw-toolbar button { flex: none; }
+  .draw-toolbar .sep { width: 1px; height: 24px; margin: 0 4px; }
+  .chart { flex: none; height: 55vh; }
+  .panel { width: auto; border-left: 0; border-top: 1px solid var(--border); }
 }

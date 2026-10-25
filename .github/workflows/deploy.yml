@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
   schedule:
-    - cron: '0 6 * * 1' # every Monday, to pick up last week's data
+    - cron: '0 6 * * 1' # every Monday, to pick up newly published data
   workflow_dispatch:
 
 permissions:
@@ -30,12 +30,14 @@ jobs:
       - run: npm test
       - uses: actions/cache@v4
         with:
-          path: .dukascopy-cache
-          key: dukascopy-${{ github.run_id }}
-          restore-keys: dukascopy-
+          path: .histdata-cache
+          key: histdata-${{ github.run_id }}
+          restore-keys: histdata-
       - name: Download market data (last 12 months)
-        # The site still deploys with demo data and CSV import if Dukascopy is unreachable.
+        # From histdata.com (Dukascopy blocks GitHub's servers). The site still deploys
+        # with whatever data it got, plus demo data and CSV import.
         continue-on-error: true
+        timeout-minutes: 30
         run: npm run fetch-data -- --from "$(date -u -d '12 months ago' +%Y-%m-01)"
       - run: npm run build
         env:
@@ -46,6 +48,7 @@ jobs:
 
   deploy:
     needs: build
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

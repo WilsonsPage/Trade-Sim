@@ -20,16 +20,13 @@ export interface ReplayView {
  * timeframe can be switched mid-replay and the trading engine can fill orders minute
  * by minute inside each chart bar.
  */
-export function useReplay(dataset: Dataset, tfSeconds: number, startTime: number) {
+export function useReplay(dataset: Dataset, tfSeconds: number, startTime: number, initialPos?: number) {
   const agg = useMemo(() => aggregate(dataset.bars, tfSeconds), [dataset, tfSeconds]);
-  const [pos, setPos] = useState(() => Math.max(0, indexAtTime(dataset.bars, startTime) - 1));
+  const [pos, setPos] = useState(() =>
+    Math.min(initialPos ?? Math.max(0, indexAtTime(dataset.bars, startTime) - 1), dataset.bars.length - 1),
+  );
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(2);
-
-  useEffect(() => {
-    setPos(Math.max(0, indexAtTime(dataset.bars, startTime) - 1));
-    setPlaying(false);
-  }, [dataset, startTime]);
 
   const atEnd = pos >= dataset.bars.length - 1;
 

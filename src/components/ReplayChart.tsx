@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   CandlestickSeries,
   ColorType,
@@ -13,15 +13,23 @@ import type { ReplayView } from '../replay/useReplay';
 
 const toCandle = (b: Bar): CandlestickData => ({ ...b, time: b.time as UTCTimestamp });
 
+export interface ChartApi {
+  chart: IChartApi;
+  series: ISeriesApi<'Candlestick'>;
+}
+
 interface Props {
   view: ReplayView;
   digits: number;
+  /** Layers (drawings, indicators) that need the chart once it exists. */
+  children?: (api: ChartApi) => ReactNode;
 }
 
-export function ReplayChart({ view, digits }: Props) {
+export function ReplayChart({ view, digits, children }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const [api, setApi] = useState<ChartApi | null>(null);
   const drawn = useRef<{ key: string; revealed: number }>({ key: '', revealed: -1 });
 
   useEffect(() => {
@@ -40,8 +48,14 @@ export function ReplayChart({ view, digits }: Props) {
       wickDownColor: '#ef5350',
     });
     chartRef.current = chart;
+    setApi({ chart, series: seriesRef.current });
+    // Lets browser tests map prices to pixels; stripped from production builds.
+    if (import.meta.env.DEV) Object.assign(window, { __chart: { chart, series: seriesRef.current } });
     return () => {
-      chart.remove();
+      setApi(null);
+      // Layers clean up their series and lines in their own effects, which can run after
+      // this one; removing the chart a tick later keeps them from touching a disposed chart.
+      setTimeout(() => chart.remove());
       chartRef.current = null;
       seriesRef.current = null;
       drawn.current = { key: '', revealed: -1 };
@@ -72,5 +86,10 @@ export function ReplayChart({ view, digits }: Props) {
     drawn.current = { key, revealed };
   }, [view]);
 
-  return <div ref={containerRef} className="chart" />;
+  return (
+    <div className="chart">
+      <div ref={containerRef} className="chart-canvas" />
+      {api && children?.(api)}
+    </div>
+  );
 }

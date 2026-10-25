@@ -1,6 +1,7 @@
 node_modules
 dist
 .dukascopy-cache
+.histdata-cache
 public/data/*.json
 !public/data/.gitkeep
 *.tsbuildinfo
