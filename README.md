@@ -20,7 +20,7 @@ Needs [Node.js](https://nodejs.org) 20 or newer.
 
 ```bash
 npm install
-npm run fetch-data      # download ~6 months of M1 data for forex majors and gold (free, from Dukascopy)
+npm run fetch-data      # download ~6 months of M1 data for forex majors and gold (free, from histdata.com)
 npm run dev             # open the printed http://localhost:5173 link
 ```
 
@@ -29,6 +29,7 @@ npm run dev             # open the printed http://localhost:5173 link
 ```bash
 npm run fetch-data -- EURUSD XAUUSD                          # only some symbols
 npm run fetch-data -- --from 2023-01-01 --to 2024-01-01      # a custom date range
+npm run fetch-data -- --source dukascopy                     # Dukascopy: includes the current month, but blocks most cloud servers
 ```
 
 Downloaded data lives in `public/data/` and is not committed. You can also import a CSV (an MT5 history export, or `time,open,high,low,close`), or use the built-in demo data.
