@@ -12,7 +12,8 @@ import { DrawingLayer } from './DrawingLayer';
 import { IndicatorLayer } from './IndicatorLayer';
 import { IndicatorsDialog } from './IndicatorsDialog';
 import { ReplayChart } from './ReplayChart';
-import { TradeLines, type DragTarget } from './TradeLines';
+import { ChartOrderMenu } from './ChartOrderMenu';
+import { TradeLines, type DragTarget, type LineAction } from './TradeLines';
 import { TradePanel } from './TradePanel';
 import type { SessionConfig } from './Setup';
 
@@ -177,10 +178,28 @@ export function Replay({ config, onExit, onEnd }: Props) {
     const o = orders.find((x) => x.id === target.id);
     if (!o) return false;
     const next = { price: o.price, sl: o.sl, tp: o.tp, [target.field]: price };
+    if (target.field === 'price') {
+      // Moving the entry carries its SL and TP along, keeping the same distances.
+      const shift = (level: number | null) => (level === null ? null : Number((level + price - o.price).toFixed(spec.digits)));
+      next.sl = shift(o.sl);
+      next.tp = shift(o.tp);
+    }
     if (target.field === 'price' && pendingPriceError(o.side, o.type, price, trading.price, trading.ask)) return false;
     if (levelError(o.side, next.price, next.sl, next.tp)) return false;
     trading.modifyOrder(o.id, next);
     return true;
+  };
+
+  const onLineAction = (a: LineAction) => {
+    if (a.type === 'close') trading.close(a.id);
+    else if (a.type === 'cancel') trading.cancelOrder(a.id);
+    else if (a.type === 'add') onDragLine(a.target, a.price);
+    else if (a.target.kind === 'position') {
+      const p = trading.state.positions.find((x) => x.id === a.target.id);
+      if (p) trading.modify(p.id, a.target.field === 'sl' ? null : p.sl, a.target.field === 'tp' ? null : p.tp);
+    } else {
+      trading.modifyOrder(a.target.id, { [a.target.field]: null });
+    }
   };
 
   useEffect(() => {
@@ -273,7 +292,23 @@ export function Replay({ config, onExit, onEnd }: Props) {
               {(api) => (
                 <>
                   <IndicatorLayer api={api} view={replay.view} defs={indicators.defs} onErrors={indicators.onErrors} />
-                  <TradeLines api={api} state={trading.state} tfSeconds={tfSeconds} now={replay.time} onDrag={onDragLine} />
+                  <TradeLines
+                    api={api}
+                    state={trading.state}
+                    bid={trading.price}
+                    ask={trading.ask}
+                    tfSeconds={tfSeconds}
+                    now={replay.time}
+                    onDrag={onDragLine}
+                    onAction={onLineAction}
+                  />
+                  <ChartOrderMenu
+                    api={api}
+                    digits={spec.digits}
+                    bid={trading.price}
+                    ask={trading.ask}
+                    onPlace={(side, type, price, lots) => trading.pendingOrder({ side, type, price, lots, sl: null, tp: null })}
+                  />
                   <DrawingLayer
                     api={api}
                     bars={replay.view.bars}

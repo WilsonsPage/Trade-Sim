@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   createSeriesMarkers,
   LineStyle,
@@ -21,20 +21,41 @@ export interface DragTarget {
   field: 'sl' | 'tp' | 'price';
 }
 
+/** A click on one of the small buttons drawn on an entry, order, SL or TP line. */
+export type LineAction =
+  | { type: 'add'; target: DragTarget; price: number }
+  | { type: 'remove'; target: DragTarget }
+  | { type: 'close'; id: string }
+  | { type: 'cancel'; id: string };
+
+interface LineButton {
+  key: string;
+  price: number;
+  color: string;
+  buttons: { label: string; title: string; action: () => LineAction | null }[];
+}
+
+/** How far from the line a new TP/SL starts, before it is dragged into place. */
+const NEW_LEVEL_PX = 60;
+
 interface Props {
   api: ChartApi;
   state: TradingState;
+  /** Current bid and ask, where a new TP/SL on an open position is measured from. */
+  bid: number;
+  ask: number;
   tfSeconds: number;
   /** Time of the last revealed bar; markers after it are hidden. */
   now: number;
   /** Called when a dragged line is dropped; return false to snap it back. */
   onDrag: (target: DragTarget, price: number) => boolean;
+  onAction: (action: LineAction) => void;
 }
 
 const GRAB_PX = 6;
 
 /** Shows open positions, SL/TP and pending orders as price lines, and fills as markers. */
-export function TradeLines({ api, state, tfSeconds, now, onDrag }: Props) {
+export function TradeLines({ api, state, bid, ask, tfSeconds, now, onDrag, onAction }: Props) {
   const lines = useRef<IPriceLine[]>([]);
   const draggable = useRef<{ line: IPriceLine; target: DragTarget; price: number }[]>([]);
   const onDragRef = useRef(onDrag);
@@ -173,6 +194,75 @@ export function TradeLines({ api, state, tfSeconds, now, onDrag }: Props) {
     markers.current?.setMarkers(list);
   }, [state.history, state.positions, tfSeconds, now]);
 
+  // Small buttons on each line: add a TP/SL (then drag it), remove a TP/SL, close or cancel.
+  const newLevel = (from: number, side: 'buy' | 'sell', field: 'sl' | 'tp') => {
+    const y = api.series.priceToCoordinate(from);
+    if (y === null) return null;
+    const up = (side === 'buy') === (field === 'tp');
+    return api.series.coordinateToPrice(y + (up ? -NEW_LEVEL_PX : NEW_LEVEL_PX));
+  };
+  const buttons: LineButton[] = [];
+  const levelButtons = (target: Omit<DragTarget, 'field'>, side: 'buy' | 'sell', from: number, sl: number | null, tp: number | null) => {
+    const add = (field: 'sl' | 'tp') => () => {
+      const price = newLevel(from, side, field);
+      return price === null ? null : { type: 'add' as const, target: { ...target, field }, price };
+    };
+    const list = [];
+    if (tp === null) list.push({ label: 'TP', title: 'Add take profit, then drag it into place', action: add('tp') });
+    if (sl === null) list.push({ label: 'SL', title: 'Add stop loss, then drag it into place', action: add('sl') });
+    return list;
+  };
+  const removeButton = (target: DragTarget) => ({
+    label: '✕',
+    title: `Remove ${target.field.toUpperCase()}`,
+    action: () => ({ type: 'remove' as const, target }),
+  });
+  for (const p of state.positions) {
+    const target = { kind: 'position' as const, id: p.id };
+    buttons.push({
+      key: p.id,
+      price: p.entryPrice,
+      color: p.side === 'buy' ? BUY : SELL,
+      buttons: [
+        ...levelButtons(target, p.side, p.side === 'buy' ? bid : ask, p.sl, p.tp),
+        { label: '✕', title: 'Close position', action: () => ({ type: 'close', id: p.id }) },
+      ],
+    });
+    if (p.sl !== null) buttons.push({ key: `${p.id}:sl`, price: p.sl, color: SELL, buttons: [removeButton({ ...target, field: 'sl' })] });
+    if (p.tp !== null) buttons.push({ key: `${p.id}:tp`, price: p.tp, color: '#26a69a', buttons: [removeButton({ ...target, field: 'tp' })] });
+  }
+  for (const o of state.orders) {
+    const target = { kind: 'order' as const, id: o.id };
+    buttons.push({
+      key: o.id,
+      price: o.price,
+      color: o.side === 'buy' ? BUY : SELL,
+      buttons: [
+        ...levelButtons(target, o.side, o.price, o.sl, o.tp),
+        { label: '✕', title: 'Cancel order', action: () => ({ type: 'cancel', id: o.id }) },
+      ],
+    });
+    if (o.sl !== null) buttons.push({ key: `${o.id}:sl`, price: o.sl, color: SELL, buttons: [removeButton({ ...target, field: 'sl' })] });
+    if (o.tp !== null) buttons.push({ key: `${o.id}:tp`, price: o.tp, color: '#26a69a', buttons: [removeButton({ ...target, field: 'tp' })] });
+  }
+
+  // Price-to-pixel mapping changes with every pan, zoom and autoscale, so follow it each frame.
+  const [, setFrame] = useState(0);
+  useEffect(() => {
+    let raf = 0;
+    let last = '';
+    const loop = () => {
+      const sig = [api.series.priceToCoordinate(1), api.series.priceToCoordinate(2), api.chart.panes()[0]?.getHeight()].join();
+      if (sig !== last) {
+        last = sig;
+        setFrame((f) => f + 1);
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    loop();
+    return () => cancelAnimationFrame(raf);
+  }, [api]);
+
   useEffect(
     () => () => {
       for (const l of lines.current) {
@@ -186,5 +276,30 @@ export function TradeLines({ api, state, tfSeconds, now, onDrag }: Props) {
     [api],
   );
 
-  return null;
+  const paneHeight = api.chart.panes()[0]?.getHeight() ?? 0;
+  return (
+    <div className="line-buttons">
+      {buttons.map((b) => {
+        const y = api.series.priceToCoordinate(b.price);
+        if (y === null || y < 0 || y > paneHeight) return null;
+        return (
+          <div key={b.key} className="line-btns" style={{ top: y, borderColor: b.color }}>
+            {b.buttons.map((btn) => (
+              <button
+                key={btn.label + btn.title}
+                title={btn.title}
+                style={{ color: b.color }}
+                onClick={() => {
+                  const action = btn.action();
+                  if (action) onAction(action);
+                }}
+              >
+                {btn.label}
+              </button>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
 }

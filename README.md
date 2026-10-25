@@ -73,7 +73,8 @@ The right-hand panel works like the MT5 mobile app:
 - **Pending orders**: Buy Limit, Sell Limit, Buy Stop and Sell Stop at a price you choose, with optional SL/TP.
 - **Positions**: live P/L. Tap a position to modify SL/TP or close it.
 - **History**: closed trades with exit reason (SL, TP or manual).
-- Entries, SL/TP and pending orders appear as lines on the chart, and fills as markers. **Drag** an SL, TP or pending-order line to move it (invalid levels snap back).
+- Entries, SL/TP and pending orders appear as lines on the chart, and fills as markers. **Drag** an SL, TP or pending-order line to move it (invalid levels snap back). Dragging an order's entry carries its SL and TP with it.
+- **Trade from the chart**: right-click (long-press on a phone) at a price to place a buy/sell limit or stop there. Each order and position line has **TP** and **SL** buttons that add the level, ready to drag into place, and **✕** to cancel, close or remove a level.
 - **Risk sizing**: switch *Volume (lots)* to *Risk (% of balance)* and the lot size is worked out from your stop loss.
 - **Costs**: set spread (pips) and commission ($ per lot, round turn) when starting a session. Buys open at the ask and close at the bid; sells the other way round.
 

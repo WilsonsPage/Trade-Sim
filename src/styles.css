@@ -62,7 +62,7 @@ code { background: var(--panel); padding: 1px 5px; border-radius: 3px; }
 
 
 
-.chart { position: relative; }
+.chart { position: relative; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
 .chart-canvas { position: absolute; inset: 0; }
 .drawing-layer { position: absolute; top: 0; left: 0; z-index: 3; pointer-events: none; overflow: hidden; }
 .drawing-layer.active { pointer-events: all; cursor: crosshair; }
@@ -141,6 +141,21 @@ th { color: var(--muted); font-weight: 500; }
 .account-setup .field { flex: 1; min-width: 150px; }
 .inline-select { padding: 0; border: none; background: none; color: var(--muted); font-size: 12px; }
 
+.line-buttons { position: absolute; top: 0; left: 0; z-index: 4; pointer-events: none; }
+.line-btns {
+  position: absolute; left: 6px; transform: translateY(-50%); display: flex; gap: 2px;
+  pointer-events: all; background: var(--bg); border: 1px solid; border-radius: 4px; padding: 1px;
+}
+.line-btns button { padding: 0 5px; font-size: 11px; line-height: 16px; font-weight: 600; border: 0; background: none; }
+.line-btns button:hover { background: var(--panel); }
+.menu-backdrop { position: absolute; inset: 0; z-index: 5; }
+.order-menu {
+  position: absolute; z-index: 6; display: flex; flex-direction: column; gap: 6px; padding: 8px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+.order-menu .buy-item { color: #fff; background: #2962ff; border-color: #2962ff; }
+.order-menu .sell-item { color: #fff; background: #ef5350; border-color: #ef5350; }
+
 /* Phones: chart on top, toolbar as a scrollable row, trade panel below. Keep last so it wins. */
 @media (max-width: 760px) {
   .replay { height: auto; min-height: 100%; }
@@ -160,5 +175,6 @@ th { color: var(--muted); font-weight: 500; }
   .charts.split .chart { height: 38vh; }
   .charts.split .chart-slot + .chart-slot { border-left: 0; border-top: 1px solid var(--border); }
   .layout-btn { display: none; }
+  .line-btns button { padding: 0 8px; line-height: 24px; font-size: 13px; }
   .panel { width: auto; border-left: 0; border-top: 1px solid var(--border); }
 }
