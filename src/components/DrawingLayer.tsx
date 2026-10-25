@@ -153,7 +153,7 @@ export function DrawingLayer(props: Props) {
         setDraft(null);
         props.onToolDone();
         onSelect(null);
-      } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && drawings.some((d) => d.id === selectedId)) {
         onChange(drawings.filter((d) => d.id !== selectedId));
         onSelect(null);
       }

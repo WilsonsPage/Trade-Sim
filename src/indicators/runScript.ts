@@ -16,6 +16,9 @@ export interface Plot {
 
 const PALETTE = ['#2962ff', '#ff9800', '#e91e63', '#00bcd4', '#9c27b0', '#8bc34a'];
 
+/** More plots than this from one script is almost certainly a bug (e.g. plot() in a loop). */
+export const MAX_PLOTS = 20;
+
 /**
  * Runs an indicator script over the bars revealed so far, so it never sees the future.
  *
@@ -24,14 +27,17 @@ const PALETTE = ['#2962ff', '#ff9800', '#e91e63', '#00bcd4', '#9c27b0', '#8bc34a
  */
 export function runScript(code: string, bars: Bar[]): Plot[] {
   const plots: Plot[] = [];
+  // Scripts can pass anything, so keep only well-formed numbers and options.
   const plot = (values: number[], options: PlotOptions = {}) => {
+    if (plots.length >= MAX_PLOTS) throw new Error(`A script can draw at most ${MAX_PLOTS} plots`);
+    const list = Array.isArray(values) ? values : [];
     plots.push({
-      values,
+      values: Array.from({ length: bars.length }, (_, i) => (typeof list[i] === 'number' ? list[i] : NaN)),
       options: {
-        title: options.title ?? '',
-        color: options.color ?? PALETTE[plots.length % PALETTE.length],
-        lineWidth: options.lineWidth ?? 2,
-        pane: options.pane ?? 'price',
+        title: typeof options?.title === 'string' ? options.title.slice(0, 40) : '',
+        color: typeof options?.color === 'string' ? options.color.slice(0, 40) : PALETTE[plots.length % PALETTE.length],
+        lineWidth: Math.min(4, Math.max(1, Math.round(Number(options?.lineWidth) || 2))),
+        pane: options?.pane === 'new' ? 'new' : 'price',
       },
     });
   };

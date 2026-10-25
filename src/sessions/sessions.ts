@@ -11,6 +11,8 @@ export interface SavedSession {
   symbol: string;
   source: DatasetSource;
   tfSeconds: number;
+  /** An optional second chart that replays alongside the main one. */
+  second?: { symbol: string; source: DatasetSource; tfSeconds: number };
   startTime: number;
   startBalance: number;
   /** Replay position (index into the raw bars). */

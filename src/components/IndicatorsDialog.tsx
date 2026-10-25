@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { PRESETS, SCRIPT_HELP, type IndicatorDef } from '../indicators/presets';
 
 interface Props {
+  title?: string;
   defs: IndicatorDef[];
   errors: Record<string, string>;
   onChange: (defs: IndicatorDef[]) => void;
   onClose: () => void;
 }
 
-export function IndicatorsDialog({ defs, errors, onChange, onClose }: Props) {
+export function IndicatorsDialog({ title = 'Indicators', defs, errors, onChange, onClose }: Props) {
   const [editing, setEditing] = useState<IndicatorDef | null>(null);
 
   const add = (preset: (typeof PRESETS)[number]) => {
@@ -57,7 +58,7 @@ export function IndicatorsDialog({ defs, errors, onChange, onClose }: Props) {
           </>
         ) : (
           <>
-            <h3>Indicators</h3>
+            <h3>{title}</h3>
             {defs.length === 0 && <p className="muted">No indicators yet. Add one below.</p>}
             {defs.map((d) => (
               <div key={d.id} className="row indicator-row">
