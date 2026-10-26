@@ -3,7 +3,7 @@ import { AreaSeries, ColorType, createChart, type UTCTimestamp } from 'lightweig
 import { symbolSpec } from '../data/symbols';
 import type { SavedSession } from '../sessions/sessions';
 import { computeStats } from '../trading/stats';
-import { byHour, bySession, byTag, byWeekday, dailyPnl, type Bucket } from '../trading/breakdown';
+import { byBracket, byHour, bySession, byTag, byWeekday, dailyPnl, type Bucket } from '../trading/breakdown';
 import type { ClosedTrade } from '../trading/engine';
 import { Shot } from './Journal';
 
@@ -187,8 +187,9 @@ export function Report({ session, onBack }: { session: SavedSession; onBack: () 
           <PnlCalendar trades={session.trading.history} />
 
           <h2>When and how you win</h2>
-          <p className="muted small">Trades · win rate · P/L, grouped by when each trade was opened (UTC) and by your tags.</p>
+          <p className="muted small">Trades · win rate · P/L, grouped by the SL/TP each trade started with, when it was opened (UTC), and your tags.</p>
           <div className="breakdowns">
+            <BreakdownTable title="Starting SL / TP (pips)" rows={byBracket(session.trading.history, spec)} />
             <BreakdownTable title="Session (UTC hours)" rows={bySession(session.trading.history)} />
             <BreakdownTable title="Day of week" rows={byWeekday(session.trading.history)} />
             <BreakdownTable title="Hour" rows={byHour(session.trading.history)} />

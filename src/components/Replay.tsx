@@ -7,6 +7,7 @@ import { SPEEDS, useFollowReplay, useReplay } from '../replay/useReplay';
 import { saveSession, type SavedSession } from '../sessions/sessions';
 import { useTrading } from '../trading/useTrading';
 import { levelError, pendingPriceError } from '../trading/validate';
+import { bracketLevels, type Bracket } from '../trading/bracket';
 import { COLORS, DrawingToolbar } from './DrawingToolbar';
 import { DrawingLayer } from './DrawingLayer';
 import { IndicatorLayer } from './IndicatorLayer';
@@ -24,6 +25,7 @@ const fmtTime = (t: number) => new Date(t * 1000).toISOString().replace('T', ' '
 
 const INDICATORS_KEY = 'trade-sim:indicators';
 const LAYOUT_KEY = 'trade-sim:split-layout';
+const BRACKET_KEY = 'trade-sim:bracket';
 
 function loadJson<T>(key: string, fallback: T): T {
   try {
@@ -216,6 +218,13 @@ export function Replay({ config, onExit, onEnd }: Props) {
     // Only when the status changes.
   }, [challengeStatus]);
 
+  // Fixed SL/TP in pips, shared by the order form, the right-click menu and the line buttons.
+  const [bracket, setBracketState] = useState<Bracket>(() => loadJson(BRACKET_KEY, { slPips: null, tpPips: null }));
+  const setBracket = (b: Bracket) => {
+    setBracketState(b);
+    storeJson(BRACKET_KEY, b);
+  };
+
   const mainApi = useRef<ChartApi | null>(null);
   const capture = async () => (mainApi.current ? captureChart(mainApi.current) : null);
 
@@ -232,7 +241,9 @@ export function Replay({ config, onExit, onEnd }: Props) {
   const onLineAction = (a: LineAction) => {
     if (a.type === 'close') trading.close(a.id);
     else if (a.type === 'cancel') trading.cancelOrder(a.id);
-    else if (a.type === 'add') onDragLine(a.target, a.price);
+    else if (a.type === 'add') {
+      if (!onDragLine(a.target, a.price) && a.fallback !== undefined) onDragLine(a.target, a.fallback);
+    }
     else if (a.target.kind === 'position') {
       const p = trading.state.positions.find((x) => x.id === a.target.id);
       if (p) trading.modify(p.id, a.target.field === 'sl' ? null : p.sl, a.target.field === 'tp' ? null : p.tp);
@@ -344,6 +355,8 @@ export function Replay({ config, onExit, onEnd }: Props) {
                     state={trading.state}
                     bid={trading.price}
                     ask={trading.ask}
+                    spec={spec}
+                    bracket={bracket}
                     tfSeconds={tfSeconds}
                     now={replay.time}
                     onDrag={onDragLine}
@@ -356,7 +369,7 @@ export function Replay({ config, onExit, onEnd }: Props) {
                     ask={trading.ask}
                     onPlace={(side, type, price, lots) => {
                       if (trading.state.challenge?.status !== 'failed') {
-                        trading.pendingOrder({ side, type, price, lots, sl: null, tp: null });
+                        trading.pendingOrder({ side, type, price, lots, ...bracketLevels(spec, side, price, bracket) });
                       }
                     }}
                   />
@@ -409,7 +422,7 @@ export function Replay({ config, onExit, onEnd }: Props) {
         </div>
         <aside className="panel">
           {replay.atEnd && <p className="notice">End of data reached.</p>}
-          <TradePanel trading={trading} spec={spec} capture={capture} />
+          <TradePanel trading={trading} spec={spec} capture={capture} bracket={bracket} onBracket={setBracket} />
         </aside>
       </main>
 

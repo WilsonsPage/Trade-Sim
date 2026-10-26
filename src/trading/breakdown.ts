@@ -1,3 +1,5 @@
+import type { SymbolSpec } from '../data/symbols';
+import { pipsBetween } from './bracket';
 import type { ClosedTrade } from './engine';
 
 export interface Bucket {
@@ -54,6 +56,14 @@ export const bySession = (trades: ClosedTrade[]) =>
     (t) => [SESSIONS.find((s) => hourOf(t) >= s.from && hourOf(t) < s.to)!.label],
     SESSIONS.map((s) => s.label),
   );
+
+/** Groups by the SL and TP distance each trade started with, e.g. "SL 10 / TP 20". */
+export function byBracket(trades: ClosedTrade[], spec: SymbolSpec): Bucket[] {
+  const pips = (d: number | null | undefined) => (d ? `${pipsBetween(spec, 0, d)}` : 'none');
+  const rank = (d: number | null | undefined) => d ?? Infinity;
+  const sorted = [...trades].sort((a, b) => rank(a.risk) - rank(b.risk) || rank(a.reward) - rank(b.reward));
+  return group(sorted, (t) => [`SL ${pips(t.risk)} / TP ${pips(t.reward)}`]);
+}
 
 /** Trades can have several tags, so one trade counts towards each of its tags. */
 export const byTag = (trades: ClosedTrade[]) =>
