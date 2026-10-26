@@ -8,6 +8,8 @@ import {
   type Time,
   type UTCTimestamp,
 } from 'lightweight-charts';
+import type { SymbolSpec } from '../data/symbols';
+import { levelAt, type Bracket } from '../trading/bracket';
 import type { TradingState } from '../trading/engine';
 import type { ChartApi } from './ReplayChart';
 
@@ -23,7 +25,8 @@ export interface DragTarget {
 
 /** A click on one of the small buttons drawn on an entry, order, SL or TP line. */
 export type LineAction =
-  | { type: 'add'; target: DragTarget; price: number }
+  /** `fallback` is tried if `price` isn't valid (e.g. a fixed-pip SL the market has already passed). */
+  | { type: 'add'; target: DragTarget; price: number; fallback?: number }
   | { type: 'remove'; target: DragTarget }
   | { type: 'close'; id: string }
   | { type: 'cancel'; id: string };
@@ -44,6 +47,9 @@ interface Props {
   /** Current bid and ask, where a new TP/SL on an open position is measured from. */
   bid: number;
   ask: number;
+  spec: SymbolSpec;
+  /** Fixed SL/TP distances; a new level is placed this far from entry when set. */
+  bracket: Bracket;
   tfSeconds: number;
   /** Time of the last revealed bar; markers after it are hidden. */
   now: number;
@@ -55,7 +61,7 @@ interface Props {
 const GRAB_PX = 6;
 
 /** Shows open positions, SL/TP and pending orders as price lines, and fills as markers. */
-export function TradeLines({ api, state, bid, ask, tfSeconds, now, onDrag, onAction }: Props) {
+export function TradeLines({ api, state, bid, ask, spec, bracket, tfSeconds, now, onDrag, onAction }: Props) {
   const lines = useRef<IPriceLine[]>([]);
   const draggable = useRef<{ line: IPriceLine; target: DragTarget; price: number }[]>([]);
   const onDragRef = useRef(onDrag);
@@ -202,14 +208,30 @@ export function TradeLines({ api, state, bid, ask, tfSeconds, now, onDrag, onAct
     return api.series.coordinateToPrice(y + (up ? -NEW_LEVEL_PX : NEW_LEVEL_PX));
   };
   const buttons: LineButton[] = [];
-  const levelButtons = (target: Omit<DragTarget, 'field'>, side: 'buy' | 'sell', from: number, sl: number | null, tp: number | null) => {
+  const levelButtons = (
+    target: Omit<DragTarget, 'field'>,
+    side: 'buy' | 'sell',
+    entry: number,
+    from: number,
+    sl: number | null,
+    tp: number | null,
+  ) => {
     const add = (field: 'sl' | 'tp') => () => {
-      const price = newLevel(from, side, field);
-      return price === null ? null : { type: 'add' as const, target: { ...target, field }, price };
+      const nearby = newLevel(from, side, field);
+      const pips = field === 'sl' ? bracket.slPips : bracket.tpPips;
+      if (pips) {
+        const price = levelAt(spec, side, entry, field, pips);
+        return { type: 'add' as const, target: { ...target, field }, price, fallback: nearby ?? undefined };
+      }
+      return nearby === null ? null : { type: 'add' as const, target: { ...target, field }, price: nearby };
+    };
+    const hint = (field: 'sl' | 'tp') => {
+      const pips = field === 'sl' ? bracket.slPips : bracket.tpPips;
+      return pips ? `${pips} pips from entry` : 'then drag it into place';
     };
     const list = [];
-    if (tp === null) list.push({ label: 'TP', title: 'Add take profit, then drag it into place', action: add('tp') });
-    if (sl === null) list.push({ label: 'SL', title: 'Add stop loss, then drag it into place', action: add('sl') });
+    if (tp === null) list.push({ label: 'TP', title: `Add take profit ${hint('tp')}`, action: add('tp') });
+    if (sl === null) list.push({ label: 'SL', title: `Add stop loss ${hint('sl')}`, action: add('sl') });
     return list;
   };
   const removeButton = (target: DragTarget) => ({
@@ -224,7 +246,7 @@ export function TradeLines({ api, state, bid, ask, tfSeconds, now, onDrag, onAct
       price: p.entryPrice,
       color: p.side === 'buy' ? BUY : SELL,
       buttons: [
-        ...levelButtons(target, p.side, p.side === 'buy' ? bid : ask, p.sl, p.tp),
+        ...levelButtons(target, p.side, p.entryPrice, p.side === 'buy' ? bid : ask, p.sl, p.tp),
         { label: '✕', title: 'Close position', action: () => ({ type: 'close', id: p.id }) },
       ],
     });
@@ -238,7 +260,7 @@ export function TradeLines({ api, state, bid, ask, tfSeconds, now, onDrag, onAct
       price: o.price,
       color: o.side === 'buy' ? BUY : SELL,
       buttons: [
-        ...levelButtons(target, o.side, o.price, o.sl, o.tp),
+        ...levelButtons(target, o.side, o.price, o.price, o.sl, o.tp),
         { label: '✕', title: 'Cancel order', action: () => ({ type: 'cancel', id: o.id }) },
       ],
     });

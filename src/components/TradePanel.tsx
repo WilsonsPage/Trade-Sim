@@ -4,6 +4,7 @@ import { pnlUsd, tradingDays, type ClosedTrade, type PendingType, type Position,
 import type { Trading } from '../trading/useTrading';
 import { levelError, pendingPriceError } from '../trading/validate';
 import { JournalEditor } from './Journal';
+import { levelAt, type Bracket } from '../trading/bracket';
 
 type OrderKind = 'market' | `${Side}-${PendingType}`;
 
@@ -159,10 +160,15 @@ export function TradePanel({
   trading,
   spec,
   capture,
+  bracket,
+  onBracket,
 }: {
   trading: Trading;
   spec: SymbolSpec;
   capture: () => Promise<string | null>;
+  /** Fixed SL/TP in pips, also used by chart orders. */
+  bracket: Bracket;
+  onBracket: (b: Bracket) => void;
 }) {
   const [tab, setTab] = useState<'trade' | 'history'>('trade');
   const [kind, setKind] = useState<OrderKind>('market');
@@ -172,16 +178,32 @@ export function TradePanel({
   const [price, setPrice] = useState('');
   const [sl, setSl] = useState('');
   const [tp, setTp] = useState('');
+  // Each level is typed as a price, or as a fixed distance in pips that every new trade uses.
+  const [slMode, setSlMode] = useState<'price' | 'pips'>(bracket.slPips !== null ? 'pips' : 'price');
+  const [tpMode, setTpMode] = useState<'price' | 'pips'>(bracket.tpPips !== null ? 'pips' : 'price');
+  const [slPips, setSlPips] = useState(bracket.slPips?.toString() ?? '10');
+  const [tpPips, setTpPips] = useState(bracket.tpPips?.toString() ?? '20');
   const [error, setError] = useState<string | null>(null);
   const { state } = trading;
 
-  const slN = num(sl);
-  const tpN = num(tp);
-  // For market orders the side isn't known until a button is pressed; infer it from the SL.
+  const pipsN = (s: string) => (Number(s) > 0 ? Number(s) : null);
+  useEffect(() => {
+    const next = { slPips: slMode === 'pips' ? pipsN(slPips) : null, tpPips: tpMode === 'pips' ? pipsN(tpPips) : null };
+    if (next.slPips !== bracket.slPips || next.tpPips !== bracket.tpPips) onBracket(next);
+  }, [slMode, tpMode, slPips, tpPips, bracket, onBracket]);
+
+  // For market orders the side isn't known until a button is pressed; infer it from a typed SL price.
+  const typedSl = slMode === 'price' ? num(sl) : null;
   const riskSide: Side =
-    kind !== 'market' ? (kind.split('-')[0] as Side) : slN !== null && slN > trading.price ? 'sell' : 'buy';
+    kind !== 'market' ? (kind.split('-')[0] as Side) : typedSl !== null && typedSl > trading.price ? 'sell' : 'buy';
   const marketEntry = riskSide === 'buy' ? trading.ask : trading.price;
   const entry = kind === 'market' ? marketEntry : Number(price) || marketEntry;
+  /** SL and TP prices for a trade on `side` entered at `at`. */
+  const levels = (side: Side, at: number) => ({
+    sl: slMode === 'pips' ? (bracket.slPips ? levelAt(spec, side, at, 'sl', bracket.slPips) : null) : num(sl),
+    tp: tpMode === 'pips' ? (bracket.tpPips ? levelAt(spec, side, at, 'tp', bracket.tpPips) : null) : num(tp),
+  });
+  const { sl: slN, tp: tpN } = levels(riskSide, entry);
   const commissionPerLot = state.commission ?? 0;
   /** Loss in USD per 1.00 lot if the stop is hit, including commission. */
   const lossPerLot = slN !== null ? Math.abs(pnlUsd(spec, riskSide, 1, entry, slN)) + commissionPerLot : null;
@@ -206,18 +228,21 @@ export function TradePanel({
     if (sizing === 'risk' && slN === null) return setError('Set a stop loss to size by risk');
     if (!(lotsN >= 0.01)) return setError('Volume must be at least 0.01 lots');
     if (kind === 'market') {
-      const err = levelError(side, side === 'buy' ? trading.ask : trading.price, slN, tpN);
+      const at = side === 'buy' ? trading.ask : trading.price;
+      const lv = levels(side, at);
+      const err = levelError(side, at, lv.sl, lv.tp);
       if (err) return setError(err);
-      trading.marketOrder(side, lotsN, slN, tpN);
+      trading.marketOrder(side, lotsN, lv.sl, lv.tp);
     } else {
       const type = kind.split('-')[1] as PendingType;
       const p = Number(price);
       if (!(p > 0)) return setError('Enter the order price');
       const priceErr = pendingPriceError(side, type, p, trading.price, trading.ask);
       if (priceErr) return setError(priceErr);
-      const err = levelError(side, p, slN, tpN);
+      const lv = levels(side, p);
+      const err = levelError(side, p, lv.sl, lv.tp);
       if (err) return setError(err);
-      trading.pendingOrder({ side, type, price: p, lots: lotsN, sl: slN, tp: tpN });
+      trading.pendingOrder({ side, type, price: p, lots: lotsN, ...lv });
     }
     setError(null);
   };
@@ -292,14 +317,34 @@ export function TradePanel({
             </div>
             <div className="row">
               <label className="field">
-                Stop loss
-                <input inputMode="decimal" value={sl} placeholder="none" onChange={(e) => setSl(e.target.value)} />
+                <select className="inline-select" value={slMode} onChange={(e) => setSlMode(e.target.value as 'price' | 'pips')}>
+                  <option value="price">Stop loss (price)</option>
+                  <option value="pips">Stop loss (pips)</option>
+                </select>
+                {slMode === 'price' ? (
+                  <input inputMode="decimal" value={sl} placeholder="none" onChange={(e) => setSl(e.target.value)} />
+                ) : (
+                  <input type="number" min="0" step="5" value={slPips} placeholder="none" onChange={(e) => setSlPips(e.target.value)} />
+                )}
               </label>
               <label className="field">
-                Take profit
-                <input inputMode="decimal" value={tp} placeholder="none" onChange={(e) => setTp(e.target.value)} />
+                <select className="inline-select" value={tpMode} onChange={(e) => setTpMode(e.target.value as 'price' | 'pips')}>
+                  <option value="price">Take profit (price)</option>
+                  <option value="pips">Take profit (pips)</option>
+                </select>
+                {tpMode === 'price' ? (
+                  <input inputMode="decimal" value={tp} placeholder="none" onChange={(e) => setTp(e.target.value)} />
+                ) : (
+                  <input type="number" min="0" step="5" value={tpPips} placeholder="none" onChange={(e) => setTpPips(e.target.value)} />
+                )}
               </label>
             </div>
+            {(bracket.slPips || bracket.tpPips) && (
+              <div className="muted small">
+                Fixed {[bracket.slPips && `SL ${bracket.slPips}`, bracket.tpPips && `TP ${bracket.tpPips}`].filter(Boolean).join(' / ')}{' '}
+                pips from entry on every trade, including right-click orders and the TP/SL line buttons.
+              </div>
+            )}
             {(risk !== null || reward !== null || sizing === 'risk') && (
               <div className="muted small">
                 {sizing === 'risk' && (slN === null ? 'Set a stop loss to size by risk · ' : `${lotsN.toFixed(2)} lots · `)}

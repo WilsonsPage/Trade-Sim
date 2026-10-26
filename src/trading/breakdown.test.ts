@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ClosedTrade } from './engine';
-import { bySession, byTag, dailyPnl } from './breakdown';
+import { symbolSpec } from '../data/symbols';
+import { byBracket, bySession, byTag, dailyPnl } from './breakdown';
 
 const trade = (entry: string, pnl: number, tags?: string[]): ClosedTrade => {
   const t = Date.parse(`${entry}Z`) / 1000;
@@ -22,6 +23,16 @@ describe('breakdowns', () => {
       ['breakout', 2, 30],
       ['(no tags)', 1, 10],
       ['FOMO', 1, -20],
+    ]);
+  });
+
+  it('groups by starting SL/TP distance in pips', () => {
+    const withLevels = (risk: number | null, reward: number | null, pnl: number) => ({ ...trade('2026-01-12T08:30:00', pnl), risk, reward });
+    const rows = byBracket([withLevels(0.002, 0.004, 40), withLevels(0.001, 0.002, -10), withLevels(0.001, 0.002, 20), withLevels(null, null, 5)], symbolSpec('EURUSD'));
+    expect(rows.map((b) => [b.label, b.trades, b.pnl])).toEqual([
+      ['SL 10 / TP 20', 2, 10],
+      ['SL 20 / TP 40', 1, 40],
+      ['SL none / TP none', 1, 5],
     ]);
   });
 

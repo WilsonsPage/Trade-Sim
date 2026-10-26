@@ -24,8 +24,10 @@ export interface Position {
   entryTime: number;
   sl: number | null;
   tp: number | null;
-  /** Distance from entry to the first stop loss (1R), for auto breakeven. */
+  /** Distance from entry to the first stop loss (1R), for auto breakeven and stats. */
   risk?: number | null;
+  /** Distance from entry to the first take profit, for comparing TP settings. */
+  reward?: number | null;
   /** Set once auto breakeven has moved the stop to entry. */
   atBreakeven?: boolean;
   /** Journal: the trader's notes, tags, and whether a chart screenshot is stored. */
@@ -186,7 +188,8 @@ export function openPosition(
   time: number,
 ): TradingState {
   const risk = order.sl === null ? null : Math.abs(price - order.sl);
-  const position: Position = { ...order, id: crypto.randomUUID(), entryPrice: price, entryTime: time, risk };
+  const reward = order.tp === null ? null : Math.abs(order.tp - price);
+  const position: Position = { ...order, id: crypto.randomUUID(), entryPrice: price, entryTime: time, risk, reward };
   return { ...state, positions: [...state.positions, position] };
 }
 
@@ -231,7 +234,15 @@ export function modifyPosition(state: TradingState, id: string, sl: number | nul
   return {
     ...state,
     positions: state.positions.map((p) =>
-      p.id === id ? { ...p, sl, tp, risk: p.risk ?? (sl === null ? null : Math.abs(p.entryPrice - sl)) } : p,
+      p.id === id
+        ? {
+            ...p,
+            sl,
+            tp,
+            risk: p.risk ?? (sl === null ? null : Math.abs(p.entryPrice - sl)),
+            reward: p.reward ?? (tp === null ? null : Math.abs(tp - p.entryPrice)),
+          }
+        : p,
     ),
   };
 }
