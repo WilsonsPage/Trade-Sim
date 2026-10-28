@@ -12,6 +12,8 @@ To get it as an app:
 - **Android:** Chrome menu → *Add to Home screen*.
 - **iPhone:** Safari share button → *Add to Home Screen*.
 
+Press **+ New sim** and answer a few quick questions: challenge or free practice, which challenge (1-step, 2-step or custom), one chart or split screen, which market(s) and timeframe, then the start date and account size. Your saved sessions are listed under the button.
+
 The site is built and published by `.github/workflows/deploy.yml` on every push to `main` and every Monday.
 
 ## Run it locally (for development)
@@ -47,7 +49,7 @@ Downloaded data lives in `public/data/` and is not committed. You can also impor
 
 ## Split screen
 
-When starting a session, pick a **second chart** (optional) to watch another market next to the one you trade, for example EURUSD with the dollar index. Both charts replay in sync from the same date, and each has its own timeframe, indicators and drawings. On a laptop, the ⬒ button switches between side by side and stacked. Trading happens on the first chart.
+When starting a new sim, choose **Split screen** and pick a second market to watch another market next to the one you trade, for example EURUSD with the dollar index. Both charts replay in sync from the same date, and each has its own timeframe, indicators and drawings. On a laptop, the ⬒ button switches between side by side and stacked. Trading happens on the first chart.
 
 ## Drawing tools
 
@@ -90,7 +92,7 @@ Tap any open position or closed trade (History tab) to add **notes**, **tags** (
 
 ## Prop firm challenge mode
 
-When starting a session, pick a **Challenge**: *2-step phase 1* (8% target, 5% daily loss, 10% max loss, 4 trading days), *phase 2* (5% / 5% / 10%), *1-step* (10% / 3% / 6%) or your own numbers. The panel tracks progress to the target and how much loss room is left. Like a real evaluation, limits use equity including open trades (at the worst price each minute), the daily limit resets at 00:00 UTC from that day's starting balance, and breaking a limit closes everything and stops trading. The challenge passes once the target is banked with no trades open and the minimum trading days are met. The result shows on the session list and in the report.
+When starting a new sim, choose **Prop firm challenge**, then *2-step phase 1* (8% target, 5% daily loss, 10% max loss, 4 trading days), *phase 2* (5% / 5% / 10%), *1-step* (10% / 3% / 6%) or your own numbers. The panel tracks progress to the target and how much loss room is left. Like a real evaluation, limits use equity including open trades (at the worst price each minute), the daily limit resets at 00:00 UTC from that day's starting balance, and breaking a limit closes everything and stops trading. The challenge passes once the target is banked with no trades open and the minimum trading days are met. The result shows on the session list and in the report.
 
 ## Sessions and stats
 
@@ -114,3 +116,4 @@ Found a security problem? Please report it privately through the repository's **
 4. ✅ Polish and mobile: phone layout, draggable levels, spread/commission, risk sizing, compact data
 5. ✅ Split screen with a second market, more markets, security hardening
 6. ✅ Trading from the chart, step back, go to session, auto breakeven, prop firm challenges, journal and analytics
+7. ✅ Step-by-step new sim wizard

@@ -57,6 +57,45 @@ interface Props {
   onReport: (s: SavedSession) => void;
 }
 
+type Step = 'mode' | 'challenge' | 'split' | 'markets' | 'account';
+
+const STEP_TITLES: Record<Step, string> = {
+  mode: 'Challenge',
+  challenge: 'Rules',
+  split: 'Charts',
+  markets: 'Markets',
+  account: 'Account',
+};
+
+/** Account sizes prop firms usually offer. */
+const BALANCES = [5000, 10000, 25000, 50000, 100000, 200000];
+
+const pct = (n: number) => `${+(n * 100).toFixed(2)}%`;
+
+function ChoiceCard({
+  icon,
+  title,
+  detail,
+  active,
+  onClick,
+}: {
+  icon: string;
+  title: string;
+  detail: string;
+  active?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button className={active ? 'choice-card active' : 'choice-card'} onClick={onClick} aria-pressed={!!active}>
+      <span className="choice-icon" aria-hidden>
+        {icon}
+      </span>
+      <strong>{title}</strong>
+      <span className="muted small">{detail}</span>
+    </button>
+  );
+}
+
 export function Setup({ onStart, onReport }: Props) {
   const [index, setIndex] = useState<DatasetInfo[] | null>(null);
   const [dataset, setDataset] = useState<Dataset | null>(null);
@@ -70,11 +109,40 @@ export function Setup({ onStart, onReport }: Props) {
   const [status, setStatus] = useState('');
   const [second, setSecond] = useState<SecondChart | null>(null);
   const [challenge, setChallenge] = useState<ChallengeRules | null>(null);
+  // Wizard answers. null means "not answered yet".
+  const [open, setOpen] = useState(false);
+  const [step, setStep] = useState<Step>('mode');
+  const [isChallenge, setIsChallenge] = useState<boolean | null>(null);
+  const [split, setSplit] = useState<boolean | null>(null);
 
   useEffect(() => {
     loadIndex().then(setIndex);
     listSessions().then(setSessions).catch(() => setSessions([]));
   }, []);
+
+  // Split screen needs at least two downloaded markets.
+  const canSplit = !!index && index.length > 1;
+  const steps: Step[] = ['mode', ...(isChallenge ? ['challenge' as const] : []), ...(canSplit ? ['split' as const] : []), 'markets', 'account'];
+  const stepNo = steps.indexOf(step);
+
+  const go = (next: Step) => {
+    setStatus('');
+    setStep(next);
+  };
+  const back = () => (stepNo > 0 ? go(steps[stepNo - 1]) : setOpen(false));
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  const openWizard = () => {
+    setStep('mode');
+    setStatus('');
+    setOpen(true);
+  };
 
   const resume = async (s: SavedSession) => {
     setStatus(`Loading ${s.symbol}…`);
@@ -151,15 +219,315 @@ export function Setup({ onStart, onReport }: Props) {
   };
 
   // With two charts, the start date must fall where both have data.
-  const ranges = [dataset, second?.dataset].filter((d): d is Dataset => !!d).map((d) => d.bars);
+  const ranges = [dataset, split ? second?.dataset : undefined].filter((d): d is Dataset => !!d).map((d) => d.bars);
   const first = ranges.length ? Math.max(...ranges.map((b) => b[0].time)) : undefined;
   const last = ranges.length ? Math.min(...ranges.map((b) => b[b.length - 1].time)) : undefined;
+  const overlap = first !== undefined && last !== undefined && first <= last;
   const label = (symbol: string) => (symbolName(symbol) ? `${symbol} · ${symbolName(symbol)}` : symbol);
+
+  const challengeValid = !!challenge && challenge.profitTarget > 0 && challenge.dailyLoss > 0 && challenge.maxLoss > 0;
+  const ready: Record<Step, boolean> = {
+    mode: isChallenge !== null,
+    challenge: challengeValid,
+    split: split !== null,
+    markets: !!dataset && (!split || !!second) && overlap,
+    account: !!start && Number(balance) > 0,
+  };
+
+  const begin = () =>
+    dataset &&
+    onStart({
+      id: crypto.randomUUID(),
+      createdAt: Date.now(),
+      dataset,
+      source: source!,
+      tfSeconds,
+      second: (split && second) || undefined,
+      startTime: Math.max(fromDateInput(start), first!),
+      startBalance: Number(balance),
+      spreadPips: Math.max(0, Number(spread) || 0),
+      commission: Math.max(0, Number(commission) || 0),
+      challenge: (isChallenge && challenge) || undefined,
+    });
+
+  const twoStep = challenge?.name.startsWith('2-step') ?? false;
+  const summary = [
+    dataset && `${dataset.symbol} ${tfLabel(tfSeconds)}`,
+    split && second && `${second.dataset.symbol} ${tfLabel(second.tfSeconds)}`,
+  ]
+    .filter(Boolean)
+    .join(' + ');
+
+  const body = () => {
+    switch (step) {
+      case 'mode':
+        return (
+          <>
+            <h2>Are you doing a challenge?</h2>
+            <div className="choice-grid">
+              <ChoiceCard
+                icon="🏆"
+                title="Prop firm challenge"
+                detail="Hit a profit target without breaking daily or max loss limits."
+                active={isChallenge === true}
+                onClick={() => {
+                  setIsChallenge(true);
+                  if (!challenge) setChallenge(CHALLENGES[0]);
+                  go('challenge');
+                }}
+              />
+              <ChoiceCard
+                icon="📈"
+                title="Free practice"
+                detail="No rules. Just replay the market and trade."
+                active={isChallenge === false}
+                onClick={() => {
+                  setIsChallenge(false);
+                  go(canSplit ? 'split' : 'markets');
+                }}
+              />
+            </div>
+          </>
+        );
+      case 'challenge':
+        return (
+          <>
+            <h2>1-step or 2-step?</h2>
+            <div className="choice-grid">
+              <ChoiceCard
+                icon="1️⃣"
+                title="1-step"
+                detail={`One phase: ${pct(CHALLENGES[2].profitTarget)} target, ${pct(CHALLENGES[2].maxLoss)} max loss.`}
+                active={challenge?.name === '1-step'}
+                onClick={() => setChallenge(CHALLENGES[2])}
+              />
+              <ChoiceCard
+                icon="2️⃣"
+                title="2-step"
+                detail={`Phase 1 then phase 2, ${pct(CHALLENGES[0].maxLoss)} max loss.`}
+                active={twoStep}
+                onClick={() => !twoStep && setChallenge(CHALLENGES[0])}
+              />
+              <ChoiceCard
+                icon="⚙️"
+                title="Custom"
+                detail="Set your own target and limits."
+                active={challenge?.name === 'Custom'}
+                onClick={() => setChallenge({ ...(challenge ?? CHALLENGES[0]), name: 'Custom' })}
+              />
+            </div>
+            {twoStep && (
+              <div className="chips phase-pick">
+                {CHALLENGES.slice(0, 2).map((c) => (
+                  <button key={c.name} className={challenge?.name === c.name ? 'chip active' : 'chip'} onClick={() => setChallenge(c)}>
+                    {c.name.replace('2-step, p', 'P')}
+                  </button>
+                ))}
+              </div>
+            )}
+            {challenge && (
+              <>
+                <p className="muted small">
+                  Limits use equity (including open trades) and the daily limit resets at 00:00 UTC. Edit any number to
+                  make it custom.
+                </p>
+                <div className="row account-setup challenge-rules">
+                  {(
+                    [
+                      ['Profit target %', 'profitTarget'],
+                      ['Daily loss limit %', 'dailyLoss'],
+                      ['Max loss limit %', 'maxLoss'],
+                    ] as const
+                  ).map(([label, key]) => (
+                    <label key={key} className="field">
+                      {label}
+                      <input
+                        type="number"
+                        min="0.5"
+                        step="0.5"
+                        value={+(challenge[key] * 100).toFixed(2)}
+                        onChange={(e) => setChallenge({ ...challenge, name: 'Custom', [key]: Math.max(0, Number(e.target.value)) / 100 })}
+                      />
+                    </label>
+                  ))}
+                  <label className="field">
+                    Min trading days
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={challenge.minTradingDays}
+                      onChange={(e) => setChallenge({ ...challenge, name: 'Custom', minTradingDays: Math.max(0, Math.round(Number(e.target.value))) })}
+                    />
+                  </label>
+                </div>
+              </>
+            )}
+          </>
+        );
+      case 'split':
+        return (
+          <>
+            <h2>One chart or split screen?</h2>
+            <div className="choice-grid">
+              <ChoiceCard
+                icon="▭"
+                title="One chart"
+                detail="Trade a single market."
+                active={split === false}
+                onClick={() => {
+                  setSplit(false);
+                  go('markets');
+                }}
+              />
+              <ChoiceCard
+                icon="◫"
+                title="Split screen"
+                detail="Two markets side by side, replaying on the same date."
+                active={split === true}
+                onClick={() => {
+                  setSplit(true);
+                  go('markets');
+                }}
+              />
+            </div>
+          </>
+        );
+      case 'markets':
+        return (
+          <>
+            <h2>{split ? 'Main chart (the one you trade)' : 'Pick a market'}</h2>
+            {index === null && <p className="muted">Looking for downloaded data…</p>}
+            {index?.length === 0 && (
+              <p className="muted">
+                No market data found. Try the demo data or import a CSV below. (Running locally? Use{' '}
+                <code>npm run fetch-data</code> to download market data.)
+              </p>
+            )}
+            <div className="chips main-pick">
+              {index?.map((info) => (
+                <button
+                  key={info.symbol}
+                  className={dataset?.symbol === info.symbol ? 'chip active' : 'chip'}
+                  onClick={() => pickDownloaded(info)}
+                  title={`${toDateInput(info.from)} → ${toDateInput(info.to)}`}
+                >
+                  {label(info.symbol)}
+                </button>
+              ))}
+              {!split && (
+                <>
+                  <button className={dataset?.symbol === 'DEMO' ? 'chip active' : 'chip'} onClick={() => choose(demoDataset(), { kind: 'demo' })}>
+                    Demo data
+                  </button>
+                  <label className="chip">
+                    Import CSV…
+                    <input type="file" accept=".csv,.txt" hidden onChange={(e) => e.target.files?.[0] && importFile(e.target.files[0])} />
+                  </label>
+                </>
+              )}
+            </div>
+            {dataset && (
+              <>
+                <h3>Timeframe</h3>
+                <div className="chips main-tf">
+                  {TIMEFRAMES.filter((tf) => tf.seconds >= dataset.baseSeconds).map((tf) => (
+                    <button key={tf.label} className={tf.seconds === tfSeconds ? 'chip active' : 'chip'} onClick={() => setTfSeconds(tf.seconds)}>
+                      {tf.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            {split && dataset && index && (
+              <>
+                <h2>Second chart</h2>
+                <p className="muted small">Replays in sync with {dataset.symbol}. You place trades on the main chart.</p>
+                <div className="chips second-pick">
+                  {index
+                    .filter((info) => info.symbol !== dataset.symbol)
+                    .map((info) => (
+                      <button
+                        key={info.symbol}
+                        className={second?.dataset.symbol === info.symbol ? 'chip active' : 'chip'}
+                        onClick={() => pickSecond(info)}
+                      >
+                        {label(info.symbol)}
+                      </button>
+                    ))}
+                </div>
+                {second && (
+                  <>
+                    <h3>Timeframe</h3>
+                    <div className="chips second-tf">
+                      {TIMEFRAMES.filter((tf) => tf.seconds >= second.dataset.baseSeconds).map((tf) => (
+                        <button
+                          key={tf.label}
+                          className={tf.seconds === second.tfSeconds ? 'chip active' : 'chip'}
+                          onClick={() => setSecond({ ...second, tfSeconds: tf.seconds })}
+                        >
+                          {tf.label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+            {dataset && !overlap && <p className="error">These two markets have no dates in common. Pick another second chart.</p>}
+          </>
+        );
+      case 'account':
+        return (
+          <>
+            <h2>Start date and account</h2>
+            <label className="field">
+              Start replay from
+              <input type="date" value={start} min={toDateInput(first!)} max={toDateInput(last!)} onChange={(e) => setStart(e.target.value)} />
+            </label>
+            <span className="muted small">
+              Data available {toDateInput(first!)} to {toDateInput(last!)}
+            </span>
+            <h3>Starting balance</h3>
+            <div className="chips balance-pick">
+              {BALANCES.map((b) => (
+                <button key={b} className={Number(balance) === b ? 'chip active' : 'chip'} onClick={() => setBalance(String(b))}>
+                  ${b / 1000}k
+                </button>
+              ))}
+            </div>
+            <div className="row account-setup">
+              <label className="field">
+                Balance (USD)
+                <input type="number" min="100" step="100" value={balance} onChange={(e) => setBalance(e.target.value)} />
+              </label>
+              <label className="field">
+                Spread (pips)
+                <input type="number" min="0" step="0.1" value={spread} onChange={(e) => setSpread(e.target.value)} />
+              </label>
+              <label className="field">
+                Commission ($ per lot, round turn)
+                <input type="number" min="0" step="0.5" value={commission} onChange={(e) => setCommission(e.target.value)} />
+              </label>
+            </div>
+            <p className="wizard-summary">
+              {summary}
+              {isChallenge && challenge && ` · ${challenge.name} challenge`}
+              {Number(balance) > 0 && ` · $${Number(balance).toLocaleString()}`}
+            </p>
+          </>
+        );
+    }
+  };
 
   return (
     <div className="setup">
       <h1>Trade Sim</h1>
-      <p className="muted">Pick a market, timeframe and start date, then replay the bars and trade them.</p>
+      <p className="muted">Replay real market data bar by bar and trade it, on your own or as a prop firm challenge.</p>
+      <button className="primary new-sim" onClick={openWizard}>
+        + New sim
+      </button>
+      {!open && status && <p className="muted">{status}</p>}
 
       {sessions.length > 0 && (
         <>
@@ -201,209 +569,49 @@ export function Setup({ onStart, onReport }: Props) {
               );
             })}
           </div>
-          <h2>New session</h2>
         </>
       )}
 
-      <h2>1. Market data</h2>
-      {index === null && <p className="muted">Looking for downloaded data…</p>}
-      {index?.length === 0 && (
-        <p className="muted">
-          No market data found. Try the demo data or import a CSV below. (Running locally? Use{' '}
-          <code>npm run fetch-data</code> to download market data.)
-        </p>
-      )}
-      <div className="chips">
-        {index?.map((info) => (
-          <button
-            key={info.symbol}
-            className={dataset?.symbol === info.symbol ? 'chip active' : 'chip'}
-            onClick={() => pickDownloaded(info)}
-            title={`${toDateInput(info.from)} → ${toDateInput(info.to)}`}
-          >
-            {label(info.symbol)}
-          </button>
-        ))}
-        <button className={dataset?.symbol === 'DEMO' ? 'chip active' : 'chip'} onClick={() => choose(demoDataset(), { kind: 'demo' })}>
-          Demo data
-        </button>
-        <label className="chip">
-          Import CSV…
-          <input type="file" accept=".csv,.txt" hidden onChange={(e) => e.target.files?.[0] && importFile(e.target.files[0])} />
-        </label>
-      </div>
-      {status && <p className="muted">{status}</p>}
-
-      {dataset && (
-        <>
-          <p className="muted">
-            {dataset.symbol}: {dataset.bars.length.toLocaleString()} bars from {toDateInput(first!)} to {toDateInput(last!)}
-          </p>
-
-          <h2>2. Timeframe</h2>
-          <div className="chips">
-            {TIMEFRAMES.filter((tf) => tf.seconds >= dataset.baseSeconds).map((tf) => (
-              <button
-                key={tf.label}
-                className={tf.seconds === tfSeconds ? 'chip active' : 'chip'}
-                onClick={() => setTfSeconds(tf.seconds)}
-              >
-                {tf.label}
+      {open && (
+        <div className="wizard-backdrop" onClick={(e) => e.target === e.currentTarget && setOpen(false)}>
+          <div className="wizard" role="dialog" aria-modal="true" aria-label="New sim">
+            <div className="wizard-head">
+              <span className="muted small">
+                Step {stepNo + 1} of {steps.length}
+              </span>
+              <button className="wizard-close" onClick={() => setOpen(false)} title="Close">
+                ✕
               </button>
-            ))}
-          </div>
-
-          {index && index.length > 1 && (
-            <>
-              <h2>3. Second chart (optional)</h2>
-              <p className="muted small">
-                Watch another market next to {dataset.symbol}, replaying in sync. You trade on {dataset.symbol}.
-              </p>
-              <div className="chips second-pick">
-                <button className={second ? 'chip' : 'chip active'} onClick={() => pickSecond(null)}>
-                  None
-                </button>
-                {index
-                  .filter((info) => info.symbol !== dataset.symbol)
-                  .map((info) => (
-                    <button
-                      key={info.symbol}
-                      className={second?.dataset.symbol === info.symbol ? 'chip active' : 'chip'}
-                      onClick={() => pickSecond(info)}
-                    >
-                      {label(info.symbol)}
-                    </button>
-                  ))}
-              </div>
-              {second && (
-                <div className="chips second-tf">
-                  {TIMEFRAMES.filter((tf) => tf.seconds >= second.dataset.baseSeconds).map((tf) => (
-                    <button
-                      key={tf.label}
-                      className={tf.seconds === second.tfSeconds ? 'chip active' : 'chip'}
-                      onClick={() => setSecond({ ...second, tfSeconds: tf.seconds })}
-                    >
-                      {tf.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-
-          <h2>{index && index.length > 1 ? 4 : 3}. Start replay from</h2>
-          {first! > last! && <p className="error">These two markets have no dates in common. Pick another second chart.</p>}
-          <input
-            type="date"
-            value={start}
-            min={toDateInput(first!)}
-            max={toDateInput(last!)}
-            onChange={(e) => setStart(e.target.value)}
-          />
-
-          <h2>{index && index.length > 1 ? 5 : 4}. Account</h2>
-          <div className="row account-setup">
-            <label className="field">
-              Starting balance (USD)
-              <input type="number" min="100" step="100" value={balance} onChange={(e) => setBalance(e.target.value)} />
-            </label>
-            <label className="field">
-              Spread (pips)
-              <input type="number" min="0" step="0.1" value={spread} onChange={(e) => setSpread(e.target.value)} />
-            </label>
-            <label className="field">
-              Commission ($ per lot, round turn)
-              <input type="number" min="0" step="0.5" value={commission} onChange={(e) => setCommission(e.target.value)} />
-            </label>
-          </div>
-
-          <h2>{index && index.length > 1 ? 6 : 5}. Challenge (optional)</h2>
-          <p className="muted small">
-            Practise a prop firm style evaluation: hit the profit target without breaking the daily or overall loss
-            limits. Limits use equity (including open trades) and reset at 00:00 UTC.
-          </p>
-          <div className="chips">
-            <button className={challenge ? 'chip' : 'chip active'} onClick={() => setChallenge(null)}>
-              None
-            </button>
-            {CHALLENGES.map((c) => (
-              <button
-                key={c.name}
-                className={challenge?.name === c.name ? 'chip active' : 'chip'}
-                onClick={() => setChallenge(c)}
-              >
-                {c.name}
-              </button>
-            ))}
-            <button
-              className={challenge?.name === 'Custom' ? 'chip active' : 'chip'}
-              onClick={() => setChallenge({ ...(challenge ?? CHALLENGES[0]), name: 'Custom' })}
-            >
-              Custom
-            </button>
-          </div>
-          {challenge && (
-            <div className="row account-setup challenge-rules">
-              {(
-                [
-                  ['Profit target %', 'profitTarget'],
-                  ['Daily loss limit %', 'dailyLoss'],
-                  ['Max loss limit %', 'maxLoss'],
-                ] as const
-              ).map(([label, key]) => (
-                <label key={key} className="field">
-                  {label}
-                  <input
-                    type="number"
-                    min="0.5"
-                    step="0.5"
-                    value={+(challenge[key] * 100).toFixed(2)}
-                    onChange={(e) => setChallenge({ ...challenge, name: 'Custom', [key]: Math.max(0, Number(e.target.value)) / 100 })}
-                  />
-                </label>
-              ))}
-              <label className="field">
-                Min trading days
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={challenge.minTradingDays}
-                  onChange={(e) => setChallenge({ ...challenge, name: 'Custom', minTradingDays: Math.max(0, Math.round(Number(e.target.value))) })}
-                />
-              </label>
             </div>
-          )}
-
-          <div>
-            <button
-              className="primary"
-              disabled={
-                !start ||
-                !(Number(balance) > 0) ||
-                first! > last! ||
-                (!!challenge && !(challenge.profitTarget > 0 && challenge.dailyLoss > 0 && challenge.maxLoss > 0))
-              }
-              onClick={() =>
-                onStart({
-                  id: crypto.randomUUID(),
-                  createdAt: Date.now(),
-                  dataset,
-                  source: source!,
-                  tfSeconds,
-                  second: second ?? undefined,
-                  startTime: Math.max(fromDateInput(start), first!),
-                  startBalance: Number(balance),
-                  spreadPips: Math.max(0, Number(spread) || 0),
-                  commission: Math.max(0, Number(commission) || 0),
-                  challenge: challenge ?? undefined,
-                })
-              }
-            >
-              Start replay
-            </button>
+            <ol className="wizard-steps">
+              {steps.map((s, i) => (
+                <li key={s} className={i < stepNo ? 'done' : i === stepNo ? 'current' : ''}>
+                  {i < stepNo ? (
+                    <button onClick={() => go(s)}>{STEP_TITLES[s]}</button>
+                  ) : (
+                    <span>{STEP_TITLES[s]}</span>
+                  )}
+                </li>
+              ))}
+            </ol>
+            <div className="wizard-body">
+              {body()}
+              {status && <p className="muted">{status}</p>}
+            </div>
+            <div className="wizard-foot">
+              <button onClick={back}>{stepNo > 0 ? '← Back' : 'Cancel'}</button>
+              {step === 'account' ? (
+                <button className="primary" disabled={!ready.account || !ready.markets} onClick={begin}>
+                  Start sim
+                </button>
+              ) : (
+                <button className="primary" disabled={!ready[step]} onClick={() => go(steps[stepNo + 1])}>
+                  Next →
+                </button>
+              )}
+            </div>
           </div>
-        </>
+        </div>
       )}
     </div>
   );
