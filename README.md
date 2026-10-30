@@ -46,6 +46,9 @@ Downloaded data lives in `public/data/` and is not committed. You can also impor
 | Play / pause | ▶ Play | Space |
 | Speed | bars/s dropdown | |
 | Change timeframe mid-replay | timeframe dropdown | |
+| Shade 08:00–20:00 UK time on each day | 🕗 UK hours | |
+
+**UK hours** is off by default and remembered on your device. It shades the hours you'd be at the screen in green (UK clock time, so it shifts by an hour in UTC when the clocks change) on both charts. It's only a guide: you can still trade outside it.
 
 ## Split screen
 

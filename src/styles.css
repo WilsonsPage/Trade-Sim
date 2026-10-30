@@ -45,6 +45,7 @@ code { background: var(--panel); padding: 1px 5px; border-radius: 3px; }
 }
 .toolbar .spacer { flex: 1; }
 .toolbar .divider { width: 1px; height: 20px; background: var(--border); }
+.toolbar button.hours-btn.active { border-color: #26a69a; color: #fff; background: rgba(38, 166, 154, 0.2); }
 .body { flex: 1; display: flex; min-height: 0; }
 .charts { flex: 1; min-width: 0; display: flex; }
 .charts.stacked { flex-direction: column; }

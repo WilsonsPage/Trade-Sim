@@ -19,6 +19,7 @@ import { GoToMenu } from './GoToMenu';
 import { indexAtTime } from '../data/aggregate';
 import { TradeLines, type DragTarget, type LineAction } from './TradeLines';
 import { TradePanel } from './TradePanel';
+import { TradingHoursLayer } from './TradingHoursLayer';
 import type { SessionConfig } from './Setup';
 
 const fmtTime = (t: number) => new Date(t * 1000).toISOString().replace('T', ' ').slice(0, 16);
@@ -26,6 +27,7 @@ const fmtTime = (t: number) => new Date(t * 1000).toISOString().replace('T', ' '
 const INDICATORS_KEY = 'trade-sim:indicators';
 const LAYOUT_KEY = 'trade-sim:split-layout';
 const BRACKET_KEY = 'trade-sim:bracket';
+const HOURS_KEY = 'trade-sim:uk-hours';
 
 function loadJson<T>(key: string, fallback: T): T {
   try {
@@ -169,6 +171,13 @@ export function Replay({ config, onExit, onEnd }: Props) {
     storeJson(LAYOUT_KEY, !stacked);
   };
 
+  // Green shading for 08:00–20:00 UK time. Visual only: trading is allowed at any hour.
+  const [ukHours, setUkHours] = useState(() => loadJson(HOURS_KEY, false));
+  const toggleUkHours = () => {
+    setUkHours(!ukHours);
+    storeJson(HOURS_KEY, !ukHours);
+  };
+
   const changeColor = (c: string) => {
     setColor(c);
     if (!selectedId) return;
@@ -307,6 +316,14 @@ export function Replay({ config, onExit, onEnd }: Props) {
             </option>
           ))}
         </select>
+        <button
+          className={ukHours ? 'hours-btn active' : 'hours-btn'}
+          onClick={toggleUkHours}
+          aria-pressed={ukHours}
+          title="Shade 08:00–20:00 UK time on each day (visual only, you can still trade outside it)"
+        >
+          🕗 UK hours
+        </button>
         <GoToMenu now={replay.time} end={dataset.bars[dataset.bars.length - 1].time} onGo={goTo} />
         {second && (
           <button className="layout-btn" onClick={toggleLayout} title={stacked ? 'Show charts side by side' : 'Stack charts'}>
@@ -349,6 +366,7 @@ export function Replay({ config, onExit, onEnd }: Props) {
               {(api) => (
                 <>
                   <KeepApi api={api} into={mainApi} />
+                  {ukHours && <TradingHoursLayer api={api} view={replay.view} tfSeconds={tfSeconds} />}
                   <IndicatorLayer api={api} view={replay.view} defs={indicators.defs} onErrors={indicators.onErrors} />
                   <TradeLines
                     api={api}
@@ -400,6 +418,7 @@ export function Replay({ config, onExit, onEnd }: Props) {
                 <ReplayChart view={follow.view} digits={spec2.digits}>
                   {(api) => (
                     <>
+                      {ukHours && <TradingHoursLayer api={api} view={follow.view!} tfSeconds={tf2} />}
                       <IndicatorLayer api={api} view={follow.view!} defs={indicators2.defs} onErrors={indicators2.onErrors} />
                       <DrawingLayer
                         api={api}
