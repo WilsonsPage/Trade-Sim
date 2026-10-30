@@ -143,3 +143,30 @@ describe('challenge', () => {
     expect(s.challenge).toMatchObject({ status: 'passed', decidedAt: 120 });
   });
 });
+
+describe('equity drawdown', () => {
+  it('counts floating losses on open trades, even if the trade recovers', () => {
+    let s = openPosition(initialState(10_000, 0), { side: 'buy', lots: 1, sl: null, tp: null }, 1.1, 0);
+    s = processBar(s, eurusd, bar(1.1, 1.101, 1.1, 1.101, 60)); // peak 10,100
+    s = processBar(s, eurusd, bar(1.101, 1.101, 1.097, 1.098, 120)); // low 9,700
+    s = processBar(s, eurusd, bar(1.098, 1.103, 1.098, 1.103, 180));
+    s = closePosition(s, eurusd, s.positions[0].id, 1.103, 180, 'manual');
+    expect(s.balance).toBeCloseTo(10_300);
+    expect(s.equityDrawdown!.max).toBeCloseTo(400);
+    expect(s.equityDrawdown!.maxPct).toBeCloseTo(400 / 10_100);
+    expect(s.equityDrawdown!.maxTime).toBe(120);
+    expect(s.equityDrawdown!.peak).toBeCloseTo(10_300);
+  });
+
+  it('measures a stopped-out trade at its stop, not the bar low', () => {
+    let s = openPosition(initialState(10_000, 0), { side: 'buy', lots: 1, sl: 1.099, tp: null }, 1.1, 0);
+    s = processBar(s, eurusd, bar(1.1, 1.1, 1.095, 1.096, 60));
+    expect(s.equityDrawdown!.max).toBeCloseTo(100);
+  });
+
+  it('samples equity at most once per period while trades are open', () => {
+    let s = openPosition(initialState(10_000, 0), { side: 'buy', lots: 1, sl: null, tp: null }, 1.1, 0);
+    for (let t = 60; t <= 1800; t += 60) s = processBar(s, eurusd, bar(1.1, 1.1, 1.1, 1.1, t));
+    expect(s.equitySamples!.map((e) => e.time)).toEqual([60, 900, 1800]);
+  });
+});

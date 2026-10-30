@@ -264,6 +264,15 @@ export function TradePanel({
           <span className="muted">Floating</span>
           <strong className={trading.floating >= 0 ? 'profit' : 'loss'}>{money(trading.floating)}</strong>
         </div>
+        <div title="Fall in equity, open trades included, from its highest point. Max is the deepest so far, using each minute's worst price.">
+          <span className="muted">Drawdown</span>
+          <strong className={trading.drawdown > 0 ? 'loss' : undefined}>{money(trading.drawdown)}</strong>
+          {state.equityDrawdown && (
+            <span className="muted small">
+              max {money(state.equityDrawdown.max)} ({(state.equityDrawdown.maxPct * 100).toFixed(1)}%)
+            </span>
+          )}
+        </div>
       </div>
 
       {state.challenge && <ChallengeCard trading={trading} />}
