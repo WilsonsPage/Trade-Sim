@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { AreaSeries, ColorType, createChart, type UTCTimestamp } from 'lightweight-charts';
+import { AreaSeries, ColorType, LineSeries, createChart, type UTCTimestamp } from 'lightweight-charts';
 import { symbolSpec } from '../data/symbols';
 import type { SavedSession } from '../sessions/sessions';
 import { computeStats } from '../trading/stats';
@@ -21,16 +21,29 @@ function EquityChart({ session }: { session: SavedSession }) {
       grid: { vertLines: { color: '#1e222d' }, horzLines: { color: '#1e222d' } },
       timeScale: { timeVisible: true },
     });
-    const series = chart.addSeries(AreaSeries, {
+    const balance = chart.addSeries(AreaSeries, {
       lineColor: '#2962ff',
       topColor: 'rgba(41, 98, 255, 0.3)',
       bottomColor: 'rgba(41, 98, 255, 0)',
       priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
     });
     // Several trades can close in the same second; keep the last equity for each time.
-    const points = new Map<number, number>();
-    for (const p of session.trading.equityCurve) points.set(p.time, p.equity);
-    series.setData([...points].sort((a, b) => a[0] - b[0]).map(([time, value]) => ({ time: time as UTCTimestamp, value })));
+    const line = (pts: { time: number; equity: number }[]) => {
+      const points = new Map<number, number>();
+      for (const p of pts) points.set(p.time, p.equity);
+      return [...points].sort((a, b) => a[0] - b[0]).map(([time, value]) => ({ time: time as UTCTimestamp, value }));
+    };
+    balance.setData(line(session.trading.equityCurve));
+    const samples = session.trading.equitySamples;
+    if (samples?.length) {
+      // Equity with open trades marked to market; equals the balance whenever no trade is open.
+      const equity = chart.addSeries(LineSeries, {
+        color: '#ff9800',
+        lineWidth: 1,
+        priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+      });
+      equity.setData(line([...session.trading.equityCurve, ...samples].sort((a, b) => a.time - b.time)));
+    }
     chart.timeScale().fitContent();
     return () => chart.remove();
   }, [session]);
@@ -117,6 +130,8 @@ function BreakdownTable({ title, rows }: { title: string; rows: Bucket[] }) {
 export function Report({ session, onBack }: { session: SavedSession; onBack: () => void }) {
   const s = computeStats(session.trading.history, session.startBalance);
   const spec = symbolSpec(session.symbol);
+  // Sessions saved before equity tracking only have the closed-trade (balance) drawdown.
+  const dd = session.trading.equityDrawdown;
 
   const tiles: [string, string, string?][] = [
     ['Net P/L', money(s.netPnl), s.netPnl >= 0 ? 'profit' : 'loss'],
@@ -124,7 +139,12 @@ export function Report({ session, onBack }: { session: SavedSession; onBack: () 
     ['Trades', `${s.trades} (${s.wins}W / ${s.losses}L${s.breakeven ? ` / ${s.breakeven}BE` : ''})`],
     ['Strike rate', s.trades ? pct(s.strikeRate) : '—'],
     ['Profit factor', s.profitFactor === null ? '—' : s.profitFactor.toFixed(2)],
-    ['Max drawdown', `${money(s.maxDrawdown)} (${pct(s.maxDrawdownPct)})`, s.maxDrawdown > 0 ? 'loss' : undefined],
+    [
+      'Max equity drawdown',
+      dd ? `${money(dd.max)} (${pct(dd.maxPct)})` : '—',
+      dd && dd.max > 0 ? 'loss' : undefined,
+    ],
+    ['Max balance drawdown', `${money(s.maxDrawdown)} (${pct(s.maxDrawdownPct)})`, s.maxDrawdown > 0 ? 'loss' : undefined],
     ['Avg R', s.avgR === null ? '—' : `${s.avgR.toFixed(2)}R`],
     ['Expectancy', `${money(s.expectancy)} / trade`],
     ['Avg win', money(s.avgWin), 'profit'],
@@ -179,6 +199,12 @@ export function Report({ session, onBack }: { session: SavedSession; onBack: () 
       </div>
 
       <h2>Equity</h2>
+      {session.trading.equitySamples?.length ? (
+        <p className="muted small">
+          Blue is the balance after each closed trade; orange is equity with open trades marked to market.
+          {dd?.maxTime && ` The deepest equity drawdown was reached ${fmtTime(dd.maxTime)} UTC.`}
+        </p>
+      ) : null}
       {s.trades ? <EquityChart session={session} /> : <p className="muted">No trades were taken in this session.</p>}
 
       {s.trades > 0 && (

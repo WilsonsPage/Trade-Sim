@@ -49,12 +49,16 @@ export function useTrading(
   const bar = dataset.bars[pos];
   const price = bar.close;
   const floating = engine.floatingPnl(state, spec, price);
+  const equity = state.balance + floating;
+  const peak = Math.max(state.equityDrawdown?.peak ?? state.startBalance, equity);
 
   return {
     state,
     price,
     floating,
-    equity: state.balance + floating,
+    equity,
+    /** How far equity is below its highest point right now. */
+    drawdown: peak - equity,
     /** Bid and ask at the current bar. */
     ask: price + (state.spread ?? 0),
     marketOrder: (side: Side, lots: number, sl: number | null, tp: number | null) =>

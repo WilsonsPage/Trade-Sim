@@ -64,11 +64,28 @@ export interface TradingState {
   history: ClosedTrade[];
   /** Equity after each closed trade, starting with the opening balance, for drawdown stats. */
   equityCurve: { time: number; equity: number }[];
+  /** Drawdown on equity, open positions included, tracked minute by minute. Missing on old sessions. */
+  equityDrawdown?: EquityDrawdown;
+  /** Equity (balance plus floating P/L) while trades are open, at most one point per EQUITY_SAMPLE seconds. */
+  equitySamples?: { time: number; equity: number }[];
   /** Move the stop to entry once a trade is this many R in profit; null is off. */
   autoBreakevenR?: number | null;
   /** Prop firm style challenge rules and progress, if this session is a challenge. */
   challenge?: Challenge;
 }
+
+export interface EquityDrawdown {
+  /** Highest equity reached so far. */
+  peak: number;
+  /** Largest fall from a peak to the lowest equity seen in a later minute, in USD and as a fraction of that peak. */
+  max: number;
+  maxPct: number;
+  /** When the deepest point of the largest drawdown was reached. */
+  maxTime?: number;
+}
+
+/** Seconds between stored equity points; one per 15 minutes keeps a year of replay small. */
+export const EQUITY_SAMPLE = 900;
 
 /** Limits are fractions of the starting balance, e.g. 0.08 for 8%. */
 export interface ChallengeRules {
@@ -103,6 +120,36 @@ export function tradingDays(state: TradingState): number {
   return new Set([...state.history, ...state.positions].map((p) => Math.floor(p.entryTime / DAY))).size;
 }
 
+/** Equity at the worst price each position saw in this minute. */
+function worstEquity(state: TradingState, spec: SymbolSpec, bar: Bar, ask: Bar): number {
+  return state.positions.reduce(
+    (sum, p) =>
+      sum + pnlUsd(spec, p.side, p.lots, p.entryPrice, p.side === 'buy' ? bar.low : ask.high) - (state.commission ?? 0) * p.lots,
+    state.balance,
+  );
+}
+
+/**
+ * Updates equity drawdown after a minute. The low is measured against the peak from before
+ * this minute, since the order of the high and low inside it is unknown; the new peak is
+ * taken from the close so an intrabar spike doesn't count as a high that was then lost.
+ */
+function trackEquity(state: TradingState, spec: SymbolSpec, bar: Bar, ask: Bar): TradingState {
+  const dd = state.equityDrawdown ?? { peak: state.startBalance, max: 0, maxPct: 0 };
+  const low = worstEquity(state, spec, bar, ask);
+  const close = state.balance + floatingPnl(state, spec, bar.close);
+  const next: EquityDrawdown = { ...dd, peak: Math.max(dd.peak, close) };
+  if (dd.peak - low > dd.max) Object.assign(next, { max: dd.peak - low, maxPct: (dd.peak - low) / dd.peak, maxTime: bar.time });
+  let samples = state.equitySamples;
+  if (state.positions.length) {
+    const last = samples?.[samples.length - 1];
+    if (!last || Math.floor(last.time / EQUITY_SAMPLE) !== Math.floor(bar.time / EQUITY_SAMPLE)) {
+      samples = [...(samples ?? []), { time: bar.time, equity: close }];
+    }
+  }
+  return { ...state, equityDrawdown: next, equitySamples: samples };
+}
+
 /** Checks challenge limits after a bar, closing everything if one is broken. */
 function checkChallenge(state: TradingState, spec: SymbolSpec, bar: Bar, ask: Bar): TradingState {
   const c = state.challenge;
@@ -114,12 +161,7 @@ function checkChallenge(state: TradingState, spec: SymbolSpec, bar: Bar, ask: Ba
   const { rules } = ch;
   const start = s.startBalance;
 
-  // Equity at the worst price each position saw in this minute.
-  const worst = s.positions.reduce(
-    (sum, p) =>
-      sum + pnlUsd(spec, p.side, p.lots, p.entryPrice, p.side === 'buy' ? bar.low : ask.high) - (s.commission ?? 0) * p.lots,
-    s.balance,
-  );
+  const worst = worstEquity(s, spec, bar, ask);
   const reason =
     worst <= start * (1 - rules.maxLoss)
       ? `Max loss limit (${(rules.maxLoss * 100).toFixed(1)}%) broken`
@@ -152,6 +194,8 @@ export function initialState(startBalance: number, time: number, spread = 0, com
     orders: [],
     history: [],
     equityCurve: [{ time, equity: startBalance }],
+    equityDrawdown: { peak: startBalance, max: 0, maxPct: 0 },
+    equitySamples: [],
   };
 }
 
@@ -309,7 +353,7 @@ export function processBar(state: TradingState, spec: SymbolSpec, bar: Bar): Tra
       }
     }
   }
-  return checkChallenge(s, spec, bar, ask);
+  return checkChallenge(trackEquity(s, spec, bar, ask), spec, bar, ask);
 }
 
 /** Closes all positions at `price` and drops pending orders. */
