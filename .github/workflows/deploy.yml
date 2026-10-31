@@ -35,13 +35,15 @@ jobs:
           path: .histdata-cache
           key: histdata-${{ github.run_id }}
           restore-keys: histdata-
-      - name: Download market data (last 12 months)
+      - name: Download market data (last 5 years)
         if: github.event_name != 'pull_request'
         # From histdata.com (Dukascopy blocks GitHub's servers). The site still deploys
         # with whatever data it got, plus demo data and CSV import.
         continue-on-error: true
-        timeout-minutes: 30
-        run: npm run fetch-data -- --from "$(date -u -d '12 months ago' +%Y-%m-01)"
+        # Past years come as one file each and are kept in the cache above, so after the
+        # first run only the current year's months are downloaded again.
+        timeout-minutes: 60
+        run: npm run fetch-data -- --from "$(date -u -d '5 years ago' +%Y-%m-01)"
       - run: npm run build
         env:
           BASE_PATH: /${{ github.event.repository.name }}/

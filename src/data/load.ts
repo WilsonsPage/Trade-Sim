@@ -1,12 +1,30 @@
 import type { Bar, Dataset } from '../types';
 
-export interface DatasetInfo {
-  symbol: string;
+/** One month of M1 bars for a market, stored as gzipped JSON. */
+export interface MonthChunk {
+  /** "2024-03" (UTC calendar month). */
+  month: string;
   file: string;
   from: number;
   to: number;
   count: number;
 }
+
+export interface DatasetInfo {
+  symbol: string;
+  from: number;
+  to: number;
+  count: number;
+  /** The data split by month, oldest first. */
+  months?: MonthChunk[];
+  /** Older builds stored each market as one file. */
+  file?: string;
+}
+
+/** Months loaded before the start date, so the chart has history to read. */
+export const HISTORY_MONTHS = 3;
+/** Months loaded after the start date (and each time the replay gets near the end). */
+export const AHEAD_MONTHS = 3;
 
 type RawBar = [number, number, number, number, number];
 
@@ -50,17 +68,89 @@ export function decodeBars(e: EncodedBars): Dataset {
   return { symbol: e.symbol, baseSeconds: e.baseSeconds, bars };
 }
 
-export async function loadDataset(info: DatasetInfo): Promise<Dataset> {
-  const res = await fetch(`${import.meta.env.BASE_URL}data/${info.file}`);
-  if (!res.ok) throw new Error(`Could not load ${info.file} (${res.status})`);
-  const json = (await res.json()) as EncodedBars | { symbol: string; baseSeconds: number; bars: RawBar[] };
-  if ('format' in json) return decodeBars(json);
+/** Fetches a data file, gunzipping it if needed (the server may already have done so). */
+async function fetchJson(url: string): Promise<unknown> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Could not load ${url.split('/data/')[1] ?? url} (${res.status})`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) return JSON.parse(new TextDecoder().decode(bytes));
+  return JSON.parse(await gunzip(bytes));
+}
+
+async function gunzip(bytes: Uint8Array): Promise<string> {
+  if (typeof DecompressionStream !== 'undefined') {
+    const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return new Response(stream).text();
+  }
+  const { gunzipSync, strFromU8 } = await import('fflate');
+  return strFromU8(gunzipSync(bytes));
+}
+
+function toDataset(json: unknown): Dataset {
+  const j = json as EncodedBars | { symbol: string; baseSeconds: number; bars: RawBar[] };
+  if ('format' in j) return decodeBars(j);
   // Files from before the compact format.
   return {
-    symbol: json.symbol,
-    baseSeconds: json.baseSeconds,
-    bars: json.bars.map(([time, open, high, low, close]) => ({ time, open, high, low, close })),
+    symbol: j.symbol,
+    baseSeconds: j.baseSeconds,
+    bars: j.bars.map(([time, open, high, low, close]) => ({ time, open, high, low, close })),
   };
+}
+
+const dataUrl = (file: string) => `${import.meta.env.BASE_URL}data/${file}`;
+
+/** Loads months `first`..`last` (indexes into `info.months`, inclusive) as one dataset. */
+export async function loadMonths(info: DatasetInfo, first: number, last: number): Promise<Dataset> {
+  const months = info.months ?? [];
+  first = Math.max(0, first);
+  last = Math.min(months.length - 1, last);
+  const parts = await Promise.all(months.slice(first, last + 1).map(async (m) => toDataset(await fetchJson(dataUrl(m.file)))));
+  return {
+    symbol: info.symbol,
+    baseSeconds: parts[0]?.baseSeconds ?? 60,
+    bars: parts.flatMap((p) => p.bars),
+    window: { info, first, last },
+  };
+}
+
+/** Index of the month containing `time` (the nearest one if `time` falls outside the data). */
+export function monthIndexAt(info: DatasetInfo, time: number): number {
+  const months = info.months ?? [];
+  const i = months.findIndex((m) => m.to >= time);
+  return i < 0 ? months.length - 1 : i;
+}
+
+/**
+ * Loads the data a session starting at `startTime` needs: a few months of history before
+ * it and a few months to replay. Pass `fromMonth` to keep the same first month as before
+ * (a resumed session), and `until` to make sure that time is included.
+ */
+export async function loadWindow(info: DatasetInfo, startTime: number, opts: { fromMonth?: string; until?: number } = {}): Promise<Dataset> {
+  if (!info.months?.length) return loadDataset(info);
+  const start = monthIndexAt(info, startTime);
+  const pinned = opts.fromMonth ? info.months.findIndex((m) => m.month >= opts.fromMonth!) : -1;
+  const first = pinned >= 0 ? pinned : Math.max(0, start - HISTORY_MONTHS);
+  const last = Math.max(start, opts.until ? monthIndexAt(info, opts.until) : 0) + AHEAD_MONTHS;
+  return loadMonths(info, first, last);
+}
+
+/** True if months after the loaded ones exist. */
+export const hasMoreData = (d: Dataset) => !!d.window && d.window.last < (d.window.info.months?.length ?? 0) - 1;
+
+/** Appends the next months to `d`, at least up to `until` if given. Earlier bars keep their indexes. */
+export async function loadMore(d: Dataset, until?: number): Promise<Dataset> {
+  if (!d.window || !hasMoreData(d)) return d;
+  const { info, first, last } = d.window;
+  const to = Math.max(last, until ? monthIndexAt(info, until) : 0) + AHEAD_MONTHS;
+  const next = await loadMonths(info, last + 1, to);
+  return { ...d, bars: d.bars.concat(next.bars), window: { info, first, last: next.window!.last } };
+}
+
+/** The whole of a market in the single-file layout used by older builds. */
+export async function loadDataset(info: DatasetInfo): Promise<Dataset> {
+  if (info.months?.length) return loadMonths(info, 0, info.months.length - 1);
+  if (!info.file) throw new Error(`No data files listed for ${info.symbol}`);
+  return toDataset(await fetchJson(dataUrl(info.file)));
 }
 
 function parseTime(date: string, time?: string): number {

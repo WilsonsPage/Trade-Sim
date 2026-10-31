@@ -4,7 +4,7 @@ A bar-replay trading simulator: replay historical charts bar by bar, take fake t
 
 ## Use it
 
-Open **https://wilsonspage.github.io/Trade-Sim/** in Chrome or Edge. Nothing to install, and no account. Market data for the last 12 months, refreshed weekly, is already included: the forex majors, gold, silver, the US dollar index, the S&P 500, the Nasdaq 100 and Brent oil.
+Open **https://wilsonspage.github.io/Trade-Sim/** in Chrome or Edge. Nothing to install, and no account. Market data for the last 5 years, refreshed weekly, is already included: the forex majors, gold, silver, the US dollar index, the S&P 500, the Nasdaq 100 and Brent oil.
 
 To get it as an app:
 
@@ -34,7 +34,7 @@ npm run fetch-data -- --from 2023-01-01 --to 2024-01-01      # a custom date ran
 npm run fetch-data -- --source dukascopy                     # Dukascopy: includes the current month, but blocks most cloud servers
 ```
 
-Downloaded data lives in `public/data/` and is not committed. You can also import a CSV (an MT5 history export, or `time,open,high,low,close`), or use the built-in demo data.
+Downloaded data lives in `public/data/` and is not committed. Each market is stored as one gzipped file per month (`public/data/EURUSD/2024-03.json.gz`, roughly 100–200 KB each) and listed in `public/data/index.json`. A sim only downloads the months it needs: three months of history before the start date and three months ahead, with more added automatically as the replay (or a Go to jump) gets near the end. You can also import a CSV (an MT5 history export, or `time,open,high,low,close`), or use the built-in demo data.
 
 ## Replay controls
 

@@ -17,6 +17,8 @@ import { ChartOrderMenu } from './ChartOrderMenu';
 import { captureChart } from './captureChart';
 import { GoToMenu } from './GoToMenu';
 import { indexAtTime } from '../data/aggregate';
+import { hasMoreData, loadMore } from '../data/load';
+import type { Dataset } from '../types';
 import { TradeLines, type DragTarget, type LineAction } from './TradeLines';
 import { TradePanel } from './TradePanel';
 import { TradingHoursLayer } from './TradingHoursLayer';
@@ -81,6 +83,46 @@ function KeepApi({ api, into }: { api: ChartApi; into: { current: ChartApi | nul
   return null;
 }
 
+/**
+ * Appends the next months of downloaded data to each chart once its loaded bars end
+ * before `needed`, or before a time passed to `ensureLoaded` (a Go to jump).
+ */
+function useMoreData(
+  main: Dataset,
+  setMain: (d: Dataset) => void,
+  second: Dataset | null,
+  setSecond: (d: Dataset) => void,
+  needed: number,
+) {
+  const [target, setTarget] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const until = Math.max(needed, target);
+  const lastTime = (d: Dataset) => d.bars[d.bars.length - 1].time;
+  const wants = (d: Dataset | null): d is Dataset => !!d && hasMoreData(d) && lastTime(d) < until;
+
+  useEffect(() => {
+    if (loading || loadError || !(wants(main) || wants(second))) return;
+    setLoading(true);
+    Promise.all([wants(main) ? loadMore(main, until) : null, wants(second) ? loadMore(second, until) : null])
+      .then(([m, s]) => {
+        if (m) setMain(m);
+        if (s) setSecond(s);
+      })
+      .catch((e: Error) => setLoadError(e.message))
+      .finally(() => setLoading(false));
+  });
+
+  return {
+    loading,
+    loadError,
+    ensureLoaded: (time: number) => {
+      setLoadError(null);
+      setTarget(time);
+    },
+  };
+}
+
 interface Props {
   config: SessionConfig;
   onExit: () => void;
@@ -88,11 +130,22 @@ interface Props {
 }
 
 export function Replay({ config, onExit, onEnd }: Props) {
-  const { dataset, startTime, second } = config;
+  const { startTime } = config;
+  // Downloaded data arrives a few months at a time; more is appended as the replay nears the end.
+  const [dataset, setDataset] = useState(config.dataset);
+  const [dataset2, setDataset2] = useState(config.second?.dataset ?? null);
+  const second = useMemo(() => (config.second && dataset2 ? { ...config.second, dataset: dataset2 } : undefined), [config.second, dataset2]);
   const [tfSeconds, setTfSeconds] = useState(config.tfSeconds);
   const [tf2, setTf2] = useState(second?.tfSeconds ?? config.tfSeconds);
   const replay = useReplay(dataset, tfSeconds, startTime, config.initialPos);
   const follow = useFollowReplay(second?.dataset ?? null, tf2, replay.time, startTime);
+  const { loading, loadError, ensureLoaded } = useMoreData(
+    dataset,
+    setDataset,
+    dataset2,
+    setDataset2,
+    replay.time + Math.max(14 * 86400, 3 * Math.max(tfSeconds, tf2)),
+  );
   const spec = useMemo(() => symbolSpec(dataset.symbol), [dataset.symbol]);
   const spec2 = useMemo(() => second && symbolSpec(second.dataset.symbol), [second]);
   const trading = useTrading(
@@ -117,6 +170,7 @@ export function Replay({ config, onExit, onEnd }: Props) {
     startTime,
     startBalance: config.startBalance,
     pos: replay.pos,
+    posTime: replay.time,
     trading: trades,
     createdAt: config.createdAt,
     updatedAt: Date.now(),
@@ -242,10 +296,21 @@ export function Replay({ config, onExit, onEnd }: Props) {
     if (p !== null) replay.seek(p);
   };
 
+  // A jump past the loaded months loads up to that date first, then seeks once it is in.
+  const [goToTime, setGoToTime] = useState<number | null>(null);
   const goTo = (time: number) => {
-    const bars = dataset.bars;
-    replay.seek(bars[bars.length - 1].time < time ? bars.length - 1 : indexAtTime(bars, time) - 1);
+    replay.seek(replay.pos);
+    setGoToTime(time);
+    ensureLoaded(time);
   };
+  useEffect(() => {
+    if (goToTime === null) return;
+    const bars = dataset.bars;
+    const lastTime = bars[bars.length - 1].time;
+    if (lastTime < goToTime && hasMoreData(dataset) && !loadError) return; // still loading
+    setGoToTime(null);
+    replay.seek(lastTime < goToTime ? bars.length - 1 : indexAtTime(bars, goToTime) - 1);
+  }, [goToTime, dataset, loadError]);
 
   const onLineAction = (a: LineAction) => {
     if (a.type === 'close') trading.close(a.id);
@@ -324,7 +389,7 @@ export function Replay({ config, onExit, onEnd }: Props) {
         >
           🕗 UK hours
         </button>
-        <GoToMenu now={replay.time} end={dataset.bars[dataset.bars.length - 1].time} onGo={goTo} />
+        <GoToMenu now={replay.time} end={dataset.window?.info.to ?? dataset.bars[dataset.bars.length - 1].time} onGo={goTo} />
         {second && (
           <button className="layout-btn" onClick={toggleLayout} title={stacked ? 'Show charts side by side' : 'Stack charts'}>
             {stacked ? '◫' : '⬒'}
@@ -440,7 +505,14 @@ export function Replay({ config, onExit, onEnd }: Props) {
           )}
         </div>
         <aside className="panel">
-          {replay.atEnd && <p className="notice">End of data reached.</p>}
+          {replay.atEnd &&
+            (loading ? (
+              <p className="notice">Loading more data…</p>
+            ) : loadError ? (
+              <p className="notice">Could not load more data: {loadError}</p>
+            ) : (
+              <p className="notice">End of data reached.</p>
+            ))}
           <TradePanel trading={trading} spec={spec} capture={capture} bracket={bracket} onBracket={setBracket} />
         </aside>
       </main>
