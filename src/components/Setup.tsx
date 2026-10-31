@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { demoDataset, loadDataset, loadIndex, parseCsv, type DatasetInfo } from '../data/load';
+import { demoDataset, loadIndex, parseCsv, type DatasetInfo } from '../data/load';
 import { symbolName, symbolSpec } from '../data/symbols';
 import { TIMEFRAMES } from '../data/timeframes';
 import {
   deleteSession,
   listSessions,
+  loadSessionData,
   loadSource,
   storeImported,
   type DatasetSource,
@@ -48,6 +49,27 @@ const CHALLENGES: ChallengeRules[] = [
 
 const tfLabel = (s: number) => TIMEFRAMES.find((tf) => tf.seconds === s)?.label ?? `${s}s`;
 const fmtMoney = (n: number) => `${n < 0 ? '-' : '+'}$${Math.abs(n).toFixed(2)}`;
+
+/** A market picked in the wizard. Downloaded data is only fetched once the sim starts. */
+interface Pick {
+  symbol: string;
+  baseSeconds: number;
+  from: number;
+  to: number;
+  source: DatasetSource;
+  /** Already in memory (demo data and imported CSVs). */
+  dataset?: Dataset;
+}
+
+const pickOf = (info: DatasetInfo): Pick => ({ symbol: info.symbol, baseSeconds: 60, from: info.from, to: info.to, source: { kind: 'download', info } });
+const pickOfDataset = (d: Dataset, source: DatasetSource): Pick => ({
+  symbol: d.symbol,
+  baseSeconds: d.baseSeconds,
+  from: d.bars[0].time,
+  to: d.bars[d.bars.length - 1].time,
+  source,
+  dataset: d,
+});
 
 const toDateInput = (t: number) => new Date(t * 1000).toISOString().slice(0, 10);
 const fromDateInput = (s: string) => Date.parse(`${s}T00:00:00Z`) / 1000;
@@ -98,8 +120,7 @@ function ChoiceCard({
 
 export function Setup({ onStart, onReport }: Props) {
   const [index, setIndex] = useState<DatasetInfo[] | null>(null);
-  const [dataset, setDataset] = useState<Dataset | null>(null);
-  const [source, setSource] = useState<DatasetSource | null>(null);
+  const [main, setMain] = useState<Pick | null>(null);
   const [sessions, setSessions] = useState<SavedSession[]>([]);
   const [tfSeconds, setTfSeconds] = useState(900);
   const [start, setStart] = useState('');
@@ -107,7 +128,7 @@ export function Setup({ onStart, onReport }: Props) {
   const [spread, setSpread] = useState('0');
   const [commission, setCommission] = useState('0');
   const [status, setStatus] = useState('');
-  const [second, setSecond] = useState<SecondChart | null>(null);
+  const [second, setSecond] = useState<{ pick: Pick; tfSeconds: number } | null>(null);
   const [challenge, setChallenge] = useState<ChallengeRules | null>(null);
   // Wizard answers. null means "not answered yet".
   const [open, setOpen] = useState(false);
@@ -147,20 +168,19 @@ export function Setup({ onStart, onReport }: Props) {
   const resume = async (s: SavedSession) => {
     setStatus(`Loading ${s.symbol}…`);
     try {
-      const d = await loadSource(s.source);
-      const second = s.second && { dataset: await loadSource(s.second.source), source: s.second.source, tfSeconds: s.second.tfSeconds };
+      const data = await loadSessionData(s);
       onStart({
         id: s.id,
         createdAt: s.createdAt,
-        dataset: d,
+        dataset: data.dataset,
         source: s.source,
         tfSeconds: s.tfSeconds,
-        second,
+        second: s.second && data.second && { dataset: data.second, source: s.second.source, tfSeconds: s.second.tfSeconds },
         startTime: s.startTime,
         startBalance: s.startBalance,
         spreadPips: 0,
         commission: 0,
-        initialPos: s.pos,
+        initialPos: data.pos,
         initialTrading: s.trading,
       });
     } catch (e) {
@@ -174,54 +194,35 @@ export function Setup({ onStart, onReport }: Props) {
     setSessions(await listSessions());
   };
 
-  const choose = (d: Dataset, src: DatasetSource) => {
-    setDataset(d);
-    setSource(src);
-    if (second?.dataset.symbol === d.symbol) setSecond(null);
-    setSpread(String(symbolSpec(d.symbol).spreadPips));
-    if (!TIMEFRAMES.some((tf) => tf.seconds === tfSeconds && tf.seconds >= d.baseSeconds)) {
-      setTfSeconds(TIMEFRAMES.find((tf) => tf.seconds >= d.baseSeconds)?.seconds ?? d.baseSeconds);
+  const choose = (p: Pick) => {
+    setMain(p);
+    if (second?.pick.symbol === p.symbol) setSecond(null);
+    setSpread(String(symbolSpec(p.symbol).spreadPips));
+    if (!TIMEFRAMES.some((tf) => tf.seconds === tfSeconds && tf.seconds >= p.baseSeconds)) {
+      setTfSeconds(TIMEFRAMES.find((tf) => tf.seconds >= p.baseSeconds)?.seconds ?? p.baseSeconds);
     }
-    // Default to a start point a third of the way in, so there is history on the chart.
-    const bars = d.bars;
-    setStart(toDateInput(bars[Math.floor(bars.length / 3)].time));
+    // Default to a year before the end (or a third of the way into shorter data), so there
+    // is history on the chart and plenty left to replay.
+    setStart(toDateInput(Math.max(p.from + (p.to - p.from) / 3, p.to - 365 * 86400)));
     setStatus('');
   };
 
-  const pickDownloaded = async (info: DatasetInfo) => {
-    setStatus(`Loading ${info.symbol}…`);
-    try {
-      choose(await loadDataset(info), { kind: 'download', info });
-    } catch (e) {
-      setStatus((e as Error).message);
-    }
-  };
-
-  const pickSecond = async (info: DatasetInfo | null) => {
-    if (!info) return setSecond(null);
-    setStatus(`Loading ${info.symbol}…`);
-    try {
-      setSecond({ dataset: await loadDataset(info), source: { kind: 'download', info }, tfSeconds });
-      setStatus('');
-    } catch (e) {
-      setStatus((e as Error).message);
-    }
-  };
+  const pickSecond = (info: DatasetInfo | null) => setSecond(info && { pick: pickOf(info), tfSeconds });
 
   const importFile = async (file: File) => {
     try {
       const symbol = file.name.match(/^[A-Za-z]{6}/)?.[0].toUpperCase() ?? file.name.replace(/\.\w+$/, '');
       const d = parseCsv(await file.text(), symbol);
-      choose(d, await storeImported(d).catch((): DatasetSource => ({ kind: 'import', key: '' })));
+      choose(pickOfDataset(d, await storeImported(d).catch((): DatasetSource => ({ kind: 'import', key: '' }))));
     } catch (e) {
       setStatus(`Import failed: ${(e as Error).message}`);
     }
   };
 
   // With two charts, the start date must fall where both have data.
-  const ranges = [dataset, split ? second?.dataset : undefined].filter((d): d is Dataset => !!d).map((d) => d.bars);
-  const first = ranges.length ? Math.max(...ranges.map((b) => b[0].time)) : undefined;
-  const last = ranges.length ? Math.min(...ranges.map((b) => b[b.length - 1].time)) : undefined;
+  const ranges = [main, split ? second?.pick : undefined].filter((p): p is Pick => !!p);
+  const first = ranges.length ? Math.max(...ranges.map((p) => p.from)) : undefined;
+  const last = ranges.length ? Math.min(...ranges.map((p) => p.to)) : undefined;
   const overlap = first !== undefined && last !== undefined && first <= last;
   const label = (symbol: string) => (symbolName(symbol) ? `${symbol} · ${symbolName(symbol)}` : symbol);
 
@@ -230,30 +231,44 @@ export function Setup({ onStart, onReport }: Props) {
     mode: isChallenge !== null,
     challenge: challengeValid,
     split: split !== null,
-    markets: !!dataset && (!split || !!second) && overlap,
+    markets: !!main && (!split || !!second) && overlap,
     account: !!start && Number(balance) > 0,
   };
 
-  const begin = () =>
-    dataset &&
-    onStart({
-      id: crypto.randomUUID(),
-      createdAt: Date.now(),
-      dataset,
-      source: source!,
-      tfSeconds,
-      second: (split && second) || undefined,
-      startTime: Math.max(fromDateInput(start), first!),
-      startBalance: Number(balance),
-      spreadPips: Math.max(0, Number(spread) || 0),
-      commission: Math.max(0, Number(commission) || 0),
-      challenge: (isChallenge && challenge) || undefined,
-    });
+  const [loading, setLoading] = useState(false);
+  const begin = async () => {
+    if (!main) return;
+    const startTime = Math.max(fromDateInput(start), first!);
+    const load = (p: Pick) => p.dataset ?? loadSource(p.source, startTime);
+    const two = split && second ? second : null;
+    setLoading(true);
+    setStatus(`Loading ${[main.symbol, two?.pick.symbol].filter(Boolean).join(' and ')}…`);
+    try {
+      const [dataset, dataset2] = await Promise.all([load(main), two && load(two.pick)]);
+      onStart({
+        id: crypto.randomUUID(),
+        createdAt: Date.now(),
+        dataset,
+        source: main.source,
+        tfSeconds,
+        second: (two && dataset2 && { dataset: dataset2, source: two.pick.source, tfSeconds: two.tfSeconds }) || undefined,
+        startTime,
+        startBalance: Number(balance),
+        spreadPips: Math.max(0, Number(spread) || 0),
+        commission: Math.max(0, Number(commission) || 0),
+        challenge: (isChallenge && challenge) || undefined,
+      });
+    } catch (e) {
+      setStatus((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const twoStep = challenge?.name.startsWith('2-step') ?? false;
   const summary = [
-    dataset && `${dataset.symbol} ${tfLabel(tfSeconds)}`,
-    split && second && `${second.dataset.symbol} ${tfLabel(second.tfSeconds)}`,
+    main && `${main.symbol} ${tfLabel(tfSeconds)}`,
+    split && second && `${second.pick.symbol} ${tfLabel(second.tfSeconds)}`,
   ]
     .filter(Boolean)
     .join(' + ');
@@ -408,8 +423,8 @@ export function Setup({ onStart, onReport }: Props) {
               {index?.map((info) => (
                 <button
                   key={info.symbol}
-                  className={dataset?.symbol === info.symbol ? 'chip active' : 'chip'}
-                  onClick={() => pickDownloaded(info)}
+                  className={main?.symbol === info.symbol ? 'chip active' : 'chip'}
+                  onClick={() => choose(pickOf(info))}
                   title={`${toDateInput(info.from)} → ${toDateInput(info.to)}`}
                 >
                   {label(info.symbol)}
@@ -417,7 +432,7 @@ export function Setup({ onStart, onReport }: Props) {
               ))}
               {!split && (
                 <>
-                  <button className={dataset?.symbol === 'DEMO' ? 'chip active' : 'chip'} onClick={() => choose(demoDataset(), { kind: 'demo' })}>
+                  <button className={main?.symbol === 'DEMO' ? 'chip active' : 'chip'} onClick={() => choose(pickOfDataset(demoDataset(), { kind: 'demo' }))}>
                     Demo data
                   </button>
                   <label className="chip">
@@ -427,11 +442,11 @@ export function Setup({ onStart, onReport }: Props) {
                 </>
               )}
             </div>
-            {dataset && (
+            {main && (
               <>
                 <h3>Timeframe</h3>
                 <div className="chips main-tf">
-                  {TIMEFRAMES.filter((tf) => tf.seconds >= dataset.baseSeconds).map((tf) => (
+                  {TIMEFRAMES.filter((tf) => tf.seconds >= main.baseSeconds).map((tf) => (
                     <button key={tf.label} className={tf.seconds === tfSeconds ? 'chip active' : 'chip'} onClick={() => setTfSeconds(tf.seconds)}>
                       {tf.label}
                     </button>
@@ -439,17 +454,17 @@ export function Setup({ onStart, onReport }: Props) {
                 </div>
               </>
             )}
-            {split && dataset && index && (
+            {split && main && index && (
               <>
                 <h2>Second chart</h2>
-                <p className="muted small">Replays in sync with {dataset.symbol}. You place trades on the main chart.</p>
+                <p className="muted small">Replays in sync with {main.symbol}. You place trades on the main chart.</p>
                 <div className="chips second-pick">
                   {index
-                    .filter((info) => info.symbol !== dataset.symbol)
+                    .filter((info) => info.symbol !== main.symbol)
                     .map((info) => (
                       <button
                         key={info.symbol}
-                        className={second?.dataset.symbol === info.symbol ? 'chip active' : 'chip'}
+                        className={second?.pick.symbol === info.symbol ? 'chip active' : 'chip'}
                         onClick={() => pickSecond(info)}
                       >
                         {label(info.symbol)}
@@ -460,7 +475,7 @@ export function Setup({ onStart, onReport }: Props) {
                   <>
                     <h3>Timeframe</h3>
                     <div className="chips second-tf">
-                      {TIMEFRAMES.filter((tf) => tf.seconds >= second.dataset.baseSeconds).map((tf) => (
+                      {TIMEFRAMES.filter((tf) => tf.seconds >= second.pick.baseSeconds).map((tf) => (
                         <button
                           key={tf.label}
                           className={tf.seconds === second.tfSeconds ? 'chip active' : 'chip'}
@@ -474,7 +489,7 @@ export function Setup({ onStart, onReport }: Props) {
                 )}
               </>
             )}
-            {dataset && !overlap && <p className="error">These two markets have no dates in common. Pick another second chart.</p>}
+            {main && !overlap && <p className="error">These two markets have no dates in common. Pick another second chart.</p>}
           </>
         );
       case 'account':
@@ -601,7 +616,7 @@ export function Setup({ onStart, onReport }: Props) {
             <div className="wizard-foot">
               <button onClick={back}>{stepNo > 0 ? '← Back' : 'Cancel'}</button>
               {step === 'account' ? (
-                <button className="primary" disabled={!ready.account || !ready.markets} onClick={begin}>
+                <button className="primary" disabled={!ready.account || !ready.markets || loading} onClick={begin}>
                   Start sim
                 </button>
               ) : (

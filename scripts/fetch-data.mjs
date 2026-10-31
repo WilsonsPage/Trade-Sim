@@ -5,13 +5,16 @@
 //   npm run fetch-data -- --from 2024-01-01 --to 2024-07-01 GBPUSD
 //   npm run fetch-data -- --source dukascopy            -> use Dukascopy instead of histdata.com
 //
+// Each market is saved as one gzipped file per calendar month (public/data/EURUSD/2024-03.json.gz)
+// plus an entry in public/data/index.json, so the app only downloads the months a session needs.
+//
 // histdata.com (the default) has M1 data up to the last completed month and works from
 // cloud servers. Dukascopy is more current but blocks most cloud IPs, so it suits a laptop.
 // Raw downloads are cached in .histdata-cache / .dukascopy-cache so re-running is fast.
 
 import { getHistoricalRates } from 'dukascopy-node';
-import { encodeBars } from './codec.mjs';
 import { fetchHistdata } from './histdata.mjs';
+import { writeSymbol } from './store.mjs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -158,16 +161,16 @@ async function main() {
   const summary = [];
   for (const symbol of symbols) {
     const list = bars[symbol].sort((a, b) => a[0] - b[0]);
-    summary.push(`${symbol} ${list.length}`);
     if (!list.length) {
+      summary.push(`${symbol} 0`);
       warn(`${symbol}: no data downloaded`);
       continue;
     }
-    const file = `${symbol}.json`;
-    await writeFile(path.join(OUT_DIR, file), JSON.stringify(encodeBars(symbol, 60, DIGITS[symbol] ?? 5, list)));
+    const { entry, bytes } = await writeSymbol(OUT_DIR, symbol, DIGITS[symbol] ?? 5, list);
     index = index.filter((d) => d.symbol !== symbol);
-    index.push({ symbol, file, from: list[0][0], to: list[list.length - 1][0], count: list.length });
-    console.log(`  saved ${file} (${list.length} bars)`);
+    index.push(entry);
+    summary.push(`${symbol} ${list.length} (${(bytes / 1e6).toFixed(1)} MB)`);
+    console.log(`  saved ${symbol}: ${list.length} bars in ${entry.months.length} monthly files (${(bytes / 1e6).toFixed(1)} MB)`);
   }
   // GitHub shows only 10 annotations of each kind per step, so also give one line for everything.
   notice(`bars per symbol: ${summary.join(', ')}`);

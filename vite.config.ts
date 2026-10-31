@@ -55,7 +55,8 @@ export default defineConfig({
           {
             urlPattern: ({ url }) => url.pathname.includes('/data/'),
             handler: 'StaleWhileRevalidate',
-            options: { cacheName: 'market-data' },
+            // Each month of a market is its own file; keep the most recently used ones.
+            options: { cacheName: 'market-data', expiration: { maxEntries: 400 } },
           },
         ],
       },
